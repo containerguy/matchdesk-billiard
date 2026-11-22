@@ -23,6 +23,15 @@ const COLORS: Record<number, number> = {
 const IVORY = 0xf4f1ea;
 const AMBER = 0xf2a93b;
 
+/** Dauer der Einloch-Animation in Millisekunden. */
+const SINK_MS = 320;
+/** Radius der gezeichneten Taschen in Pixeln. */
+const POCKET_DRAW_RADIUS = 16;
+
+function nearestPocket(p: Vec): Vec {
+  return POCKETS.reduce((best, pocket) => (Math.hypot(pocket.x - p.x, pocket.y - p.y) < Math.hypot(best.x - p.x, best.y - p.y) ? pocket : best));
+}
+
 const toView = (p: Vec) => ({ x: RAIL + p.x * S, y: RAIL + p.y * S });
 const toTable = (x: number, y: number): Vec => ({ x: (x - RAIL) / S, y: (y - RAIL) / S });
 
@@ -49,6 +58,9 @@ export function TableView({ game }: { game: TableController }) {
         const stick = new Graphics();
         app.stage.addChild(guide, ballLayer, stick);
         const sprites = new Map<number, Container>();
+        /** Kugeln, die gerade in eine Tasche fallen: Startpunkt, Tasche und Startzeit der Animation. */
+        const sinking = new Map<number, { from: Vec; to: Vec; start: number }>();
+        const wasPotted = new Map<number, boolean>();
 
         const render = () => {
           const snap = game.getSnapshot();
@@ -62,8 +74,27 @@ export function TableView({ game }: { game: TableController }) {
             }
             const placing = b.id === 0 && snap.phase === "placing";
             const pos = placing && snap.placingPos ? snap.placingPos : b.pos;
+            // Einlochen: fällt eine Kugel während eines Stoßes, rollt sie sichtbar in die Tasche
+            if (b.potted && wasPotted.get(b.id) === false && snap.phase === "rolling" && !document.hidden) {
+              sinking.set(b.id, { from: { ...b.pos }, to: nearestPocket(b.pos), start: performance.now() });
+            }
+            if (!b.potted) sinking.delete(b.id);
+            wasPotted.set(b.id, b.potted);
+            const sink = sinking.get(b.id);
+            const t = sink ? (performance.now() - sink.start) / SINK_MS : 1;
+            if (sink && t < 1 && !placing) {
+              const ease = t * (2 - t);
+              const v = toView({ x: sink.from.x + (sink.to.x - sink.from.x) * ease, y: sink.from.y + (sink.to.y - sink.from.y) * ease });
+              sprite.position.set(v.x, v.y);
+              sprite.scale.set(1 - 0.45 * ease);
+              sprite.alpha = 1 - ease * ease;
+              sprite.visible = true;
+              continue;
+            }
+            if (sink) sinking.delete(b.id);
             const v = toView(pos);
             sprite.position.set(v.x, v.y);
+            sprite.scale.set(1);
             sprite.visible = !b.potted || placing;
             sprite.alpha = placing ? (snap.placingValid ? 0.85 : 0.35) : 1;
           }
@@ -151,8 +182,8 @@ function drawTable() {
   }
   for (const p of POCKETS) {
     const v = toView(p);
-    g.circle(v.x, v.y, 20).fill(0x070b0c);
-    g.circle(v.x, v.y, 20).stroke({ width: 3, color: 0x1e1610 });
+    g.circle(v.x, v.y, POCKET_DRAW_RADIUS).fill(0x070b0c);
+    g.circle(v.x, v.y, POCKET_DRAW_RADIUS).stroke({ width: 3, color: 0x1e1610 });
   }
   return g;
 }

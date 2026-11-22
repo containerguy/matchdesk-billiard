@@ -59,17 +59,20 @@ export function chooseBotMove(state: BillardState, seat: Seat, level: BotLevel, 
 function breakShot(cfg: LevelConfig, rnd: () => number): BillardMove {
   const cueBallPos = { x: TABLE.headStringX - 60, y: TABLE.height / 2 + (rnd() - 0.5) * 240 };
   const angle = Math.atan2(FOOT_SPOT.y - cueBallPos.y, FOOT_SPOT.x - cueBallPos.x);
-  const power = cfg.blunder > 0.2 ? 0.75 : 0.95;
-  return withNoise({ shot: { angle, power, spin: { x: 0, y: 0 } }, cueBallPos }, cfg, rnd);
+  // Kräftig genug für einen gültigen Anstoß, auch nach der Streuung der Stufe
+  const move = withNoise({ shot: { angle, power: 0.95, spin: { x: 0, y: 0 } }, cueBallPos }, cfg, rnd);
+  return { ...move, shot: { ...move.shot, power: Math.max(0.85, move.shot.power) } };
 }
 
 /** Kugeln, die der Spieler als erste treffen darf. */
 function legalTargets(state: BillardState, seat: Seat): Ball[] {
   const own = state.groups[seat];
   const live = state.balls.filter((b) => b.id !== 0 && !b.potted);
-  if (own === null) return live.filter((b) => b.id !== 8);
-  if (groupCleared(state.balls, own)) return live.filter((b) => b.id === 8);
-  return live.filter((b) => groupOf(b.id) === own);
+  // Aus dem Kopffeld heraus dürfen Kugeln im Kopffeld nicht direkt angespielt werden
+  const reachable = state.fromKitchen ? live.filter((b) => b.pos.x >= TABLE.headStringX) : live;
+  if (own === null) return reachable.filter((b) => b.id !== 8);
+  if (groupCleared(state.balls, own)) return reachable.filter((b) => b.id === 8);
+  return reachable.filter((b) => groupOf(b.id) === own);
 }
 
 /** Ist der Weg von a nach b frei von anderen Kugeln (außer den genannten)? */
@@ -148,7 +151,7 @@ function fallbackMoves(state: BillardState, seat: Seat): BillardMove[] {
   let cueBallPos: Vec | undefined;
   let from = state.balls.find((b) => b.id === 0)!.pos;
   if (state.ballInHand) {
-    cueBallPos = [{ x: TABLE.width / 2, y: TABLE.height / 2 }, { x: 400, y: 300 }, { x: 1800, y: 800 }, { x: 400, y: 800 }, { x: 1800, y: 300 }].find((p) =>
+    cueBallPos = [{ x: TABLE.width / 2, y: TABLE.height / 2 }, { x: 400, y: 300 }, { x: 1800, y: 800 }, { x: 400, y: 800 }, { x: 1800, y: 300 }, { x: 300, y: 560 }, { x: 150, y: 200 }].find((p) =>
       isValidCuePlacement(state, p)
     );
     if (cueBallPos) from = cueBallPos;

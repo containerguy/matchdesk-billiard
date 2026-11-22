@@ -16,7 +16,7 @@ const ball = (id: number, x: number, y: number, potted = false): Ball => ({ id, 
 const noSpin = { x: 0, y: 0 };
 
 function stateWith(balls: Ball[], partial: Partial<BillardState> = {}): BillardState {
-  return { balls, turn: 0, groups: [null, null], ballInHand: false, isBreak: false, winner: null, winReason: null, shots: 1, ...partial };
+  return { balls, turn: 0, groups: [null, null], ballInHand: false, isBreak: false, fromKitchen: false, winner: null, winReason: null, shots: 1, ...partial };
 }
 
 describe("Dreieck", () => {
@@ -89,7 +89,7 @@ describe("Zielhilfe", () => {
 
 describe("8-Ball-Regeln", () => {
   const contact = (b: number): PhysicsEvent => ({ kind: "ballContact", a: 0, b });
-  const rail: PhysicsEvent = { kind: "cushion", ball: 1 };
+  const rail: PhysicsEvent = { kind: "cushion", ball: 1, pos: { x: 1000, y: 28 } };
   const pocket = (b: number): PhysicsEvent => ({ kind: "pocket", ball: b, pocket: 0 });
 
   it("weist nach dem ersten Treffer die Gruppen zu und der Spieler bleibt dran", () => {
@@ -161,5 +161,47 @@ describe("8-Ball-Regeln", () => {
     expect(next.isBreak).toBe(false);
     expect(next.shots).toBe(1);
     expect(events.some((e) => e.kind === "turn" || e.kind === "won")).toBe(true);
+  });
+
+  describe("Anstoß und Kopffeld", () => {
+    const fresh = () => billard.createInitialState({ seed: 7, startingSeat: 0 });
+    const breakShot = (power: number, angle = 0) => ({ shot: { angle, power, spin: noSpin }, cueBallPos: { x: 500, y: 560 } });
+
+    it("wertet einen kräftigen Anstoß als gültig", () => {
+      const { state, events } = billard.applyMove(fresh(), 0, breakShot(0.95));
+      expect(events.some((e) => e.kind === "rebreak")).toBe(false);
+      expect(state.isBreak).toBe(false);
+    });
+
+    it("baut nach einem zu schwachen Anstoß neu auf und lässt den Gegner anstoßen", () => {
+      const { state, events } = billard.applyMove(fresh(), 0, breakShot(0.2));
+      expect(events).toEqual([{ kind: "rebreak", seat: 1, reason: "zu wenige Kugeln an der Bande" }]);
+      expect(state).toMatchObject({ turn: 1, isBreak: true, ballInHand: true, shots: 1, winner: null });
+      expect(state.balls.filter((b) => b.id !== 0 && !b.potted)).toHaveLength(15);
+    });
+
+    it("baut auch neu auf, wenn der Anstoß das Dreieck verfehlt", () => {
+      const { state, events } = billard.applyMove(fresh(), 0, breakShot(0.3, -Math.PI / 2));
+      expect(events).toEqual([{ kind: "rebreak", seat: 1, reason: "Dreieck nicht getroffen" }]);
+      expect(state.turn).toBe(1);
+    });
+
+    it("gibt nach versenkter Weißer beim Anstoß Kugel in der Hand nur im Kopffeld", () => {
+      const before = stateWith([ball(0, 300, 560), ball(1, 1700, 560), ball(8, 1900, 300)], { isBreak: true });
+      const { state } = judgeShot(before, 0, [ball(0, 0, 0, true), ball(1, 1800, 560), ball(8, 1900, 300)], [contact(1), pocket(0)]);
+      expect(state).toMatchObject({ turn: 1, ballInHand: true, fromKitchen: true });
+      expect(billard.checkMove(state, 1, { shot: { angle: 0, power: 0.5, spin: noSpin }, cueBallPos: { x: 900, y: 560 } }).ok).toBe(false);
+      expect(billard.checkMove(state, 1, { shot: { angle: 0, power: 0.5, spin: noSpin }, cueBallPos: { x: 400, y: 560 } }).ok).toBe(true);
+    });
+
+    it("ahndet es, eine Kugel im Kopffeld direkt aus dem Kopffeld anzuspielen", () => {
+      const before = stateWith([ball(0, 200, 560), ball(1, 450, 560), ball(8, 1900, 300)], { fromKitchen: true, ballInHand: true });
+      const after = [ball(0, 300, 560), ball(1, 900, 560), ball(8, 1900, 300)];
+      const direct = judgeShot(before, 0, after, [contact(1), rail]);
+      expect(direct.events).toContainEqual({ kind: "foul", seat: 0, reason: "Kugel im Kopffeld direkt angespielt" });
+      expect(direct.state.fromKitchen).toBe(false);
+      const viaRail = judgeShot(before, 0, after, [{ kind: "cushion", ball: 0, pos: { x: 2200, y: 560 } }, contact(1), rail]);
+      expect(viaRail.events.some((e) => e.kind === "foul")).toBe(false);
+    });
   });
 });

@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { gameLog, hint, HINT, newPlayer, seeded, shoot, waitForTurn } from "./helpers";
+import { gameLog, hint, HINT, newPlayer, seeded, shoot, visibleState, waitForTurn } from "./helpers";
 
 test("Solo-Partie gegen den Computer bis zum Ende", async ({ browser }) => {
   const { page, errors } = await newPlayer(browser, { fast: true });
@@ -33,14 +33,21 @@ test("Der Computer stößt sichtbar in Echtzeit, freies Üben bleibt möglich", 
   await page.getByRole("button", { name: "Allein gegen den Computer spielen" }).click();
   await page.getByRole("group", { name: "Gegner wählen" }).getByRole("button", { name: "Leicht" }).click();
 
-  // Ein Anstoß ins Leere ist ein Foul, danach ist der Computer mit Kugel in der Hand dran
+  // Ein Anstoß am Dreieck vorbei ist ungültig: es wird neu aufgebaut und der Computer stößt an
   await waitForTurn(page);
   await shoot(page, { place: { x: 400, y: 560 }, aimAt: { x: 400, y: 100 }, power: 0.2, touch: true });
-  await expect(gameLog(page).last()).toContainText("Foul von Spieler", { timeout: 30_000 });
+  await expect(gameLog(page).last()).toContainText("Ungültiger Anstoß von Spieler (Dreieck nicht getroffen)");
+  await expect(gameLog(page).last()).toContainText("Computer (Leicht) stößt an");
   await expect(hint(page)).toHaveText(HINT.opponent);
-  await expect(page.locator(".player").nth(1).locator(".badge")).toHaveText(/Kugel in der Hand|Am Zug/);
+  expect((await visibleState(page)).isBreak).toBe(true);
+
+  // Der Computer setzt die Weiße ins Kopffeld und stößt sichtbar an; sein Anstoß ist gültig
   await expect(hint(page)).toContainText(HINT.rolling, { timeout: 15_000 });
+  const during = await visibleState(page);
+  expect(during.balls.find((ball) => ball.id === 0)!.pos.x).toBeLessThanOrEqual(560);
   await expect(hint(page)).not.toContainText(HINT.rolling, { timeout: 40_000 });
+  expect((await visibleState(page)).isBreak).toBe(false);
+  expect(await gameLog(page).allInnerTexts()).not.toContainEqual(expect.stringContaining("Ungültiger Anstoß von Computer"));
 
   await page.getByRole("group", { name: "Gegner wählen" }).getByRole("button", { name: "Ohne" }).click();
   await expect(page.locator(".player .name").nth(1)).toContainText("Spieler 2");

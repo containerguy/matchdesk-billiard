@@ -589,7 +589,9 @@ function Controls({ game, snap, online }: { game: TableController; snap: Snapsho
           : ""
     : snap.phase === "placing"
       ? snap.state.isBreak
-        ? "Weiße Kugel links der Kopflinie setzen (antippen oder klicken)"
+        ? "Weiße Kugel links der Kopflinie setzen (antippen oder klicken). Kräftig anstoßen: fällt keine Kugel, müssen vier Kugeln eine Bande erreichen."
+        : snap.state.fromKitchen
+          ? "Kugel in der Hand im Kopffeld: Weiße links der Kopflinie setzen. Kugeln im Kopffeld nicht direkt anspielen."
         : "Kugel in der Hand: weiße Kugel frei setzen"
       : "Zielen: Maus bewegen oder Finger auf den Tisch. Stoßen: Maus halten und zurückziehen, oder Regler und Stoß-Knopf.";
   const canShoot = myTurn && snap.phase === "aiming";
