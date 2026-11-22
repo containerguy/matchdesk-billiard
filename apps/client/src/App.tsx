@@ -1,4 +1,4 @@
-import { groupCleared, groupOf, type Group } from "@bandenduell/billard";
+import { groupCleared, groupOf, type BotLevel, type Group } from "@bandenduell/billard";
 import type { Seat } from "@bandenduell/core";
 import type { TableView as TableInfo } from "@bandenduell/protocol";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
@@ -6,6 +6,7 @@ import type { Snapshot, TableController } from "./controller";
 import { HotseatGame } from "./hotseat";
 import { NetClient, type ChatLine } from "./net";
 import { OnlineTable } from "./online";
+import { BOT_LEVELS, SoloGame } from "./solo";
 import { TableView } from "./TableView";
 
 const BALL_COLORS: Record<number, string> = {
@@ -46,8 +47,8 @@ export function App() {
   useEmbedMessages(ns.table, ns.status);
 
   if (EMBED && !ns.table) return <EmbedWaiting status={ns.status} error={ns.error} />;
-  if (practice) return <PracticeScreen onExit={() => setPractice(false)} />;
-  if (ns.status === "idle") return <NameScreen onSubmit={(name) => net.connect(name)} />;
+  if (practice) return <PracticeScreen playerName={ns.me?.name ?? "Spieler"} onExit={() => setPractice(false)} />;
+  if (ns.status === "idle") return <NameScreen onSubmit={(name) => net.connect(name)} onPractice={() => setPractice(true)} />;
   if (ns.table) return <TableScreen net={net} table={ns.table} />;
   return <LobbyScreen net={net} onPractice={() => setPractice(true)} />;
 }
@@ -130,7 +131,7 @@ function ErrorToast({ net, message }: { net: NetClient; message: string | null }
 
 // ——— Name ———
 
-function NameScreen({ onSubmit }: { onSubmit: (name: string) => void }) {
+function NameScreen({ onSubmit, onPractice }: { onSubmit: (name: string) => void; onPractice: () => void }) {
   const [name, setName] = useState("");
   const submit = (ev: FormEvent) => {
     ev.preventDefault();
@@ -147,6 +148,9 @@ function NameScreen({ onSubmit }: { onSubmit: (name: string) => void }) {
           <input id="player-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={20} autoFocus autoComplete="nickname" />
           <button type="submit" className="primary" disabled={!name.trim()}>
             Weiter zur Lobby
+          </button>
+          <button type="button" className="ghost" onClick={onPractice}>
+            Allein gegen den Computer spielen
           </button>
         </form>
       </main>
@@ -240,7 +244,7 @@ function LobbyScreen({ net, onPractice }: { net: NetClient; onPractice: () => vo
           </div>
           <Chat lines={ns.lobbyChat} title="Lobby-Chat" onSend={(text) => net.send({ t: "chat", scope: "lobby", text })} />
           <button type="button" className="ghost wide" onClick={onPractice}>
-            Allein üben (an diesem Gerät)
+            Allein gegen den Computer spielen
           </button>
         </aside>
       </div>
@@ -425,10 +429,15 @@ function GameLog({ game }: { game: TableController }) {
   );
 }
 
-// ——— Übung an einem Gerät ———
+// ——— Solo: gegen den Computer oder frei üben ———
 
-function PracticeScreen({ onExit }: { onExit: () => void }) {
-  const game = useMemo(() => new HotseatGame(["Spieler 1", "Spieler 2"]), []);
+type SoloMode = BotLevel | "free";
+
+function PracticeScreen({ playerName, onExit }: { playerName: string; onExit: () => void }) {
+  const [mode, setMode] = useState<SoloMode>("medium");
+  const game = useMemo(() => (mode === "free" ? new HotseatGame(["Spieler 1", "Spieler 2"]) : new SoloGame(playerName, mode)), [mode, playerName]);
+  useEffect(() => () => (game instanceof SoloGame ? game.dispose() : undefined), [game]);
+  const names = game.getSnapshot().names;
   return (
     <div className="app">
       <TopBar>
@@ -436,14 +445,35 @@ function PracticeScreen({ onExit }: { onExit: () => void }) {
           Neue Partie
         </button>
         <button type="button" className="ghost" onClick={onExit}>
-          Zur Lobby
+          Zurück
         </button>
       </TopBar>
       <div className="body">
         <main className="play">
-          <PlayArea game={game} seats={[{ name: "Spieler 1", connected: true }, { name: "Spieler 2", connected: true }]} score={null} mySeat={null} />
+          <PlayArea
+            game={game}
+            seats={[{ name: names[0], connected: true }, { name: names[1], connected: true }]}
+            score={null}
+            mySeat={mode === "free" ? null : 0}
+          />
         </main>
         <aside className="side">
+          <section className="card">
+            <h2>Gegner</h2>
+            <div className="segmented opponent" role="group" aria-label="Gegner wählen">
+              {BOT_LEVELS.map((l) => (
+                <button key={l.id} type="button" aria-pressed={mode === l.id} onClick={() => setMode(l.id)}>
+                  {l.label}
+                </button>
+              ))}
+              <button type="button" aria-pressed={mode === "free"} onClick={() => setMode("free")}>
+                Ohne
+              </button>
+            </div>
+            <p className="muted small">
+              {mode === "free" ? "Freies Üben: du stößt für beide Seiten." : "Du hast den Anstoß. Ein Wechsel der Stufe beginnt eine neue Partie."}
+            </p>
+          </section>
           <GameLog game={game} />
         </aside>
       </div>
@@ -467,7 +497,7 @@ function PlayArea({ game, seats, score, mySeat }: { game: TableController; seats
               {score[0]} : {score[1]}
             </strong>
           ) : (
-            <span>Übung</span>
+            <span>{mySeat === null ? "Übung" : "Solo"}</span>
           )}
         </div>
         <PlayerCard snap={snap} seat={1} info={seats[1]} me={mySeat === 1} />
@@ -564,7 +594,7 @@ function Controls({ game, snap, online }: { game: TableController; snap: Snapsho
       : "Zielen: Maus bewegen oder Finger auf den Tisch. Stoßen: Maus halten und zurückziehen, oder Regler und Stoß-Knopf.";
   const canShoot = myTurn && snap.phase === "aiming";
   return (
-    <div className="controls">
+    <div className="controls" data-shots={snap.state.shots} data-phase={snap.phase}>
       <div className="power">
         <label htmlFor="power" className="power-head">
           <span>Stoßstärke</span>

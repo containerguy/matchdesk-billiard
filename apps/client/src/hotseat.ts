@@ -15,7 +15,7 @@ export class HotseatGame extends TableController {
     this.adopt(state);
   }
 
-  protected mayAct() {
+  protected mayAct(_state: BillardState) {
     return true;
   }
 
