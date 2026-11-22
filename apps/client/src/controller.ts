@@ -1,0 +1,315 @@
+import {
+  advance,
+  aimPreview,
+  cloneBalls,
+  isValidCuePlacement,
+  startShot,
+  type AimPreview,
+  type Ball,
+  type BillardEvent,
+  type BillardMove,
+  type BillardState,
+  type PhysicsEvent,
+  type Vec
+} from "@bandenduell/billard";
+import { otherSeat, type Seat } from "@bandenduell/core";
+
+/** Physikschritte pro Millisekunde: 480 Hz Simulation = Echtzeit, unabhängig von der Bildrate. */
+const STEPS_PER_MS = 0.48;
+/** Höchstens so viele Schritte pro Frame, damit ein Ruckler nicht alles überspringt. */
+const MAX_STEPS_PER_FRAME = 120;
+/** Zugweg in Millimetern für volle Stoßstärke beim Ziehen mit der Maus. */
+const FULL_PULL_MM = 420;
+
+export type Phase = "placing" | "aiming" | "rolling" | "over";
+export type GuideMode = "normal" | "profi";
+
+export type Snapshot = {
+  state: BillardState;
+  phase: Phase;
+  /** Darf dieser Bildschirm gerade stoßen? (online nur, wenn man selbst am Zug ist) */
+  canAct: boolean;
+  angle: number;
+  power: number;
+  dragging: boolean;
+  spin: Vec;
+  guide: GuideMode;
+  preview: AimPreview | null;
+  /** Wo die weiße Kugel gerade gesetzt wird (eigene Maus oder Gegner). */
+  placingPos: Vec | null;
+  placingValid: boolean;
+  log: string[];
+  names: [string, string];
+};
+
+type Listener = () => void;
+type Running = { sim: ReturnType<typeof startShot>; before: BillardState; seat: Seat; done: (balls: Ball[], physics: PhysicsEvent[]) => void };
+
+/**
+ * Gemeinsame Tisch-Steuerung für lokale und Online-Partien:
+ * Zielen, Weiße setzen, Stoßstärke, Effet und das Abspielen eines Stoßes.
+ */
+export abstract class TableController {
+  protected snapshot: Snapshot;
+  private listeners = new Set<Listener>();
+  private running: Running | null = null;
+  private dragStart: Vec | null = null;
+  /** Gesetzte weiße Kugel bei "Kugel in der Hand", bevor gestoßen wird. */
+  protected placedCue: Vec | null = null;
+
+  constructor(state: BillardState, names: [string, string], log: string[]) {
+    this.snapshot = {
+      state,
+      phase: phaseOf(state),
+      canAct: false,
+      angle: 0,
+      power: 0,
+      dragging: false,
+      spin: { x: 0, y: 0 },
+      guide: "normal",
+      preview: null,
+      placingPos: null,
+      placingValid: false,
+      log,
+      names
+    };
+  }
+
+  protected abstract mayAct(state: BillardState): boolean;
+  protected abstract submit(move: BillardMove): void;
+  /** Wird beim Zielen aufgerufen, z. B. um es dem Gegner zu zeigen. */
+  protected onAim(): void {}
+
+  subscribe = (listener: Listener) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+
+  getSnapshot = () => this.snapshot;
+
+  /** Kugeln, wie sie gezeichnet werden sollen. */
+  currentBalls(): Ball[] {
+    if (this.running) return this.running.sim.balls;
+    return this.ballsWithPlacedCue();
+  }
+
+  setGuide(guide: GuideMode) {
+    this.set({ guide });
+  }
+
+  setSpin(spin: Vec) {
+    const l = Math.hypot(spin.x, spin.y);
+    this.set({ spin: l > 1 ? { x: spin.x / l, y: spin.y / l } : spin });
+  }
+
+  setPower(power: number) {
+    if (!this.snapshot.canAct || this.snapshot.phase !== "aiming") return;
+    this.set({ power: Math.min(1, Math.max(0, power)) });
+    this.onAim();
+  }
+
+  /** Stoßen mit der eingestellten Stärke (Knopf, für Touch und Tastatur). */
+  shootNow() {
+    const s = this.snapshot;
+    if (!s.canAct || s.phase !== "aiming" || s.power < 0.02) return;
+    this.fire();
+  }
+
+  pointerMove(p: Vec, touch: boolean) {
+    const s = this.snapshot;
+    if (!s.canAct) return;
+    if (s.phase === "placing") {
+      this.set({ placingPos: p, placingValid: isValidCuePlacement(s.state, p) });
+      this.onAim();
+      return;
+    }
+    if (s.phase !== "aiming") return;
+    if (this.dragStart && !touch) {
+      const power = Math.min(1, Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y) / FULL_PULL_MM);
+      this.set({ power });
+      this.onAim();
+      return;
+    }
+    if (touch && !this.dragStart) return;
+    this.aimAt(p);
+  }
+
+  pointerDown(p: Vec, touch: boolean) {
+    const s = this.snapshot;
+    if (!s.canAct) return;
+    if (s.phase === "placing") {
+      if (!isValidCuePlacement(s.state, p)) {
+        this.set({ placingPos: p, placingValid: false });
+        return;
+      }
+      this.placedCue = { ...p };
+      this.set({ phase: "aiming", placingPos: null });
+      this.aimAt(touch ? cueTowardsCenter(p) : (this.lastPointer ?? cueTowardsCenter(p)));
+      return;
+    }
+    if (s.phase !== "aiming") return;
+    this.dragStart = p;
+    if (touch) {
+      // Touch: Finger auf dem Tisch dreht den Queue, Stärke kommt vom Regler
+      this.aimAt(p);
+      return;
+    }
+    this.set({ dragging: true, power: 0 });
+  }
+
+  pointerUp(touch: boolean) {
+    const s = this.snapshot;
+    const wasDragging = this.dragStart !== null;
+    this.dragStart = null;
+    if (touch || !wasDragging || s.phase !== "aiming" || !s.canAct) return;
+    if (s.power < 0.02) {
+      this.set({ dragging: false, power: 0 });
+      return;
+    }
+    this.fire();
+  }
+
+  /** Bricht eine laufende Drag-Geste ab (z. B. wenn der Zeiger das Fenster verlässt). */
+  cancelDrag() {
+    this.dragStart = null;
+    if (this.snapshot.dragging) this.set({ dragging: false });
+  }
+
+  private lastPointer: Vec | null = null;
+
+  private aimAt(p: Vec) {
+    this.lastPointer = p;
+    const balls = this.ballsWithPlacedCue();
+    const cue = balls.find((b) => b.id === 0)!;
+    const angle = Math.atan2(p.y - cue.pos.y, p.x - cue.pos.x);
+    this.set({ angle, preview: aimPreview(balls, angle) });
+    this.onAim();
+  }
+
+  private fire() {
+    const s = this.snapshot;
+    const move: BillardMove = { shot: { angle: s.angle, power: s.power, spin: s.spin } };
+    if (this.placedCue) move.cueBallPos = { ...this.placedCue };
+    this.set({ dragging: false, canAct: false });
+    this.submit(move);
+  }
+
+  /** Spielt einen Stoß ab; `done` bekommt die Kugeln nach dem Stillstand. */
+  protected play(before: BillardState, seat: Seat, move: BillardMove, done: Running["done"]) {
+    const balls = cloneBalls(before.balls);
+    if (move.cueBallPos) {
+      const cue = balls.find((b) => b.id === 0)!;
+      cue.pos = { ...move.cueBallPos };
+      cue.potted = false;
+    }
+    const placed: BillardState = { ...before, balls };
+    this.placedCue = null;
+    this.running = { sim: startShot(balls, move.shot), before: placed, seat, done };
+    this.set({ phase: "rolling", canAct: false, preview: null, placingPos: null, angle: move.shot.angle, power: move.shot.power });
+  }
+
+  protected isRolling() {
+    return this.running !== null;
+  }
+
+  /** Einen Frame weiterrechnen; `elapsedMs` = Zeit seit dem letzten Frame. */
+  tick(elapsedMs: number) {
+    const run = this.running;
+    if (!run) return;
+    const steps = Math.min(MAX_STEPS_PER_FRAME, Math.max(1, Math.round(elapsedMs * STEPS_PER_MS)));
+    if (!advance(run.sim, steps)) return;
+    this.finish(run);
+  }
+
+  /** Stoß sofort zu Ende rechnen (z. B. wenn der Tab im Hintergrund ist). */
+  fastForward() {
+    const run = this.running;
+    if (!run) return;
+    advance(run.sim, Number.MAX_SAFE_INTEGER);
+    this.finish(run);
+  }
+
+  private finish(run: Running) {
+    this.running = null;
+    run.done(run.sim.balls, run.sim.events);
+  }
+
+  /** Übernimmt einen neuen Spielzustand (nach einem Stoß oder vom Server). */
+  protected adopt(state: BillardState, extraLog: string[] = []) {
+    this.placedCue = null;
+    const phase = phaseOf(state);
+    const canAct = this.mayAct(state) && phase !== "over";
+    this.set({
+      state,
+      phase,
+      canAct,
+      power: 0,
+      dragging: false,
+      spin: { x: 0, y: 0 },
+      placingPos: null,
+      placingValid: false,
+      preview: phase === "aiming" ? aimPreview(state.balls, this.snapshot.angle) : null,
+      log: extraLog.length ? [...this.snapshot.log, ...extraLog] : this.snapshot.log
+    });
+  }
+
+  /** Zeigt das Zielen des Gegners an. */
+  protected showRemoteAim(angle: number, power: number, cuePos: Vec | null) {
+    if (this.running) return;
+    const s = this.snapshot;
+    if (s.phase === "placing" && cuePos) {
+      this.set({ placingPos: cuePos, placingValid: isValidCuePlacement(s.state, cuePos) });
+      return;
+    }
+    if (cuePos) this.placedCue = cuePos;
+    const balls = this.ballsWithPlacedCue();
+    this.set({ phase: s.phase === "placing" ? "aiming" : s.phase, angle, power, dragging: power > 0, preview: aimPreview(balls, angle) });
+  }
+
+  protected log(lines: string[]) {
+    this.set({ log: [...this.snapshot.log, ...lines] });
+  }
+
+  protected describe(e: BillardEvent): string[] {
+    const n = this.snapshot.names;
+    switch (e.kind) {
+      case "potted":
+        return [`${n[e.seat]} versenkt die ${e.ball}.`];
+      case "groupsAssigned":
+        return [`${n[e.seat]} spielt ${e.group === "solids" ? "die Vollen" : "die Halben"}, ${n[otherSeat(e.seat)]} ${e.group === "solids" ? "die Halben" : "die Vollen"}.`];
+      case "foul":
+        return [`Foul von ${n[e.seat]}: ${e.reason}. ${n[otherSeat(e.seat)]} hat Kugel in der Hand.`];
+      case "eightRespotted":
+        return ["Die 8 fiel beim Anstoß und wird zurückgesetzt."];
+      case "turn":
+        return [];
+      case "won":
+        return [`${n[e.seat]} gewinnt (${e.reason}).`];
+    }
+  }
+
+  protected set(patch: Partial<Snapshot>) {
+    this.snapshot = { ...this.snapshot, ...patch };
+    for (const l of this.listeners) l();
+  }
+
+  /** Aktuelle Position der weißen Kugel, wie sie gesetzt wurde (für den Gegner). */
+  protected cuePosForAim(): Vec | null {
+    if (this.snapshot.phase === "placing") return this.snapshot.placingPos;
+    return this.placedCue;
+  }
+
+  private ballsWithPlacedCue(): Ball[] {
+    const balls = this.snapshot.state.balls;
+    if (!this.placedCue) return balls;
+    return balls.map((b) => (b.id === 0 ? { ...b, pos: { ...this.placedCue! }, potted: false } : b));
+  }
+}
+
+function phaseOf(state: BillardState): Phase {
+  return state.winner !== null ? "over" : state.ballInHand ? "placing" : "aiming";
+}
+
+function cueTowardsCenter(p: Vec): Vec {
+  return { x: p.x + 400, y: p.y };
+}

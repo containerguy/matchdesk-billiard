@@ -1,5 +1,6 @@
-import { otherSeat, type GameDefinition, type GameResult, type MoveCheck, type Seat } from "@spielhalle/core";
+import { otherSeat, type GameDefinition, type GameResult, type MoveCheck, type Seat } from "@bandenduell/core";
 import { cloneBalls, simulateShot, type Ball, type PhysicsEvent, type Shot } from "./physics";
+import { parseMove } from "./move";
 import { rack8Ball } from "./rack";
 import { FOOT_SPOT, HEAD_SPOT, TABLE, vec, type Vec } from "./table";
 
@@ -219,6 +220,7 @@ export const billard: GameDefinition<BillardState, BillardMove, BillardEvent> = 
   players: 2,
   createInitialState,
   currentSeat: (state) => state.turn,
+  parseMove,
   checkMove,
   applyMove,
   result

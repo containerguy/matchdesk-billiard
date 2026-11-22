@@ -1,5 +1,5 @@
 /**
- * Spiel-Schnittstelle der Spielhalle.
+ * Spiel-Schnittstelle: trennt Lobby und Server vom konkreten Spiel.
  *
  * Lobby, Tische, Chat, Rangliste und Integrations-API kennen kein bestimmtes Spiel.
  * Jedes Spiel (Billard, später das Schiebespiel) liefert eine `GameDefinition`,
@@ -24,6 +24,8 @@ export interface GameDefinition<State, Move, Event> {
   createInitialState(options: { seed: number; startingSeat: Seat }): State;
   /** Wer ist am Zug? */
   currentSeat(state: State): Seat;
+  /** Liest einen Zug aus einer Netzwerknachricht; `null`, wenn die Form nicht stimmt. */
+  parseMove(raw: unknown): Move | null;
   /** Prüft einen Zug, ohne den Zustand zu ändern. */
   checkMove(state: State, seat: Seat, move: Move): MoveCheck;
   /** Wendet einen geprüften Zug an und liefert den neuen Zustand und was passiert ist. */
