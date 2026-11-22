@@ -12,6 +12,46 @@ export interface Connection {
 export const RECONNECT_GRACE_MS = 60_000;
 /** Getrennte Spieler ohne Tisch werden nach dieser Zeit vergessen. */
 const FORGET_AFTER_MS = 10 * 60_000;
+/** Ein reservierter Tisch, an den sich nie jemand gesetzt hat, verfällt nach dieser Zeit. */
+export const RESERVATION_TTL_MS = 30 * 60_000;
+/** Ein reservierter Tisch ohne Spieler wird nach dieser Zeit ohne Aktivität geschlossen. */
+export const RESERVATION_IDLE_MS = 2 * 60 * 60_000;
+
+/** Spieler eines reservierten Tisches, wie die Integration (z. B. Matchdesk) ihn kennt. */
+export type ReservedPlayer = { id: string; name: string };
+
+export type ReserveInput = {
+  players: [ReservedPlayer, ReservedPlayer];
+  name?: string;
+  /** Kennung der Integration, kommt in jedem Ereignis zurück (z. B. Partie-ID in Matchdesk). */
+  ref?: string;
+  /** Adresse für Ereignisse (Ergebnis, Verfall). */
+  callbackUrl?: string;
+};
+
+export type ReservedTableInfo = {
+  id: string;
+  code: string;
+  ref: string | null;
+  status: "waiting" | "playing" | "finished";
+  players: Array<{ id: string; name: string; seat: Seat; connected: boolean; score: number }>;
+  /** Externe ID des Siegers der letzten beendeten Partie. */
+  winner: string | null;
+  gamesPlayed: number;
+};
+
+/** Ereignis eines reservierten Tisches für die Integration. */
+export type TableEvent = {
+  type: "game.finished" | "table.expired" | "table.closed";
+  reason?: "won" | "forfeit";
+  at: string;
+  table: ReservedTableInfo;
+};
+
+/** Platz-Link-Daten für einen Spieler eines reservierten Tisches. */
+export type SeatTicket = { playerId: string; seat: Seat; token: string };
+
+export type TableEventListener = (event: TableEvent, callbackUrl: string | null) => void;
 
 type AnyGame = GameDefinition<unknown, unknown, unknown>;
 const GAMES: Record<string, AnyGame> = { [billard.id]: billard as unknown as AnyGame };
@@ -39,6 +79,19 @@ type Table = {
   nextStart: Seat;
   rematch: [boolean, boolean];
   endNote: string | null;
+  reservation: Reservation | null;
+};
+
+type Reservation = {
+  ref: string | null;
+  callbackUrl: string | null;
+  players: [ReservedPlayer, ReservedPlayer];
+  tokens: [string, string];
+  createdAt: number;
+  lastActiveAt: number;
+  joined: boolean;
+  winner: string | null;
+  gamesPlayed: number;
 };
 
 const CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -51,11 +104,34 @@ export class Hub {
   private players = new Map<string, Player>();
   private byToken = new Map<string, Player>();
   private tables = new Map<string, Table>();
+  private seatTokens = new Map<string, { tableId: string; seat: Seat }>();
 
-  constructor(private now: () => number = Date.now, private seed: () => number = () => randomInt(2 ** 31)) {}
+  constructor(
+    private now: () => number = Date.now,
+    private seed: () => number = () => randomInt(2 ** 31),
+    private onEvent: TableEventListener = () => {}
+  ) {}
 
-  /** Erste Nachricht einer Verbindung: neuer Spieler oder Wiederverbinden per Token. */
-  hello(conn: Connection, name: string, token?: string): Player | null {
+  /**
+   * Erste Nachricht einer Verbindung: neuer Spieler oder Wiederverbinden per Token.
+   * Mit `seat` (Platz-Token eines reservierten Tisches) kommen Name und Platz aus der Reservierung.
+   */
+  hello(conn: Connection, name: string, token?: string, seat?: string): Player | null {
+    const claim = seat ? this.seatTokens.get(seat) : undefined;
+    if (seat && !claim) {
+      conn.send({ t: "error", message: "Der Platz-Link ist ungültig oder abgelaufen" });
+      return null;
+    }
+    const player = this.greet(conn, claim ? this.reservedName(claim) : name, token);
+    if (player && claim) this.claimSeat(player, claim);
+    return player;
+  }
+
+  private reservedName(claim: { tableId: string; seat: Seat }) {
+    return this.tables.get(claim.tableId)?.reservation?.players[claim.seat].name ?? "";
+  }
+
+  private greet(conn: Connection, name: string, token?: string): Player | null {
     const existing = token ? this.byToken.get(token) : undefined;
     const clean = cleanName(name);
     if (existing) {
@@ -133,6 +209,150 @@ export class Hub {
         this.byToken.delete(p.token);
       }
     }
+    for (const table of [...this.tables.values()]) {
+      const r = table.reservation;
+      if (!r || table.seats[0] || table.seats[1]) continue;
+      if (!r.joined && now - r.createdAt >= RESERVATION_TTL_MS) this.dropReserved(table, "table.expired");
+      else if (r.joined && now - r.lastActiveAt >= RESERVATION_IDLE_MS) this.dropReserved(table, "table.closed");
+    }
+  }
+
+  // ——— Reservierte Tische (Integrationen) ———
+
+  /** Legt einen privaten Tisch mit zwei festen Plätzen an; jeder Platz hat ein eigenes Token für den Link. */
+  reserveTable(input: ReserveInput): ReservedTableInfo & { seats: [SeatTicket, SeatTicket] } {
+    const names = input.players.map((p) => cleanName(p.name) ?? "Spieler") as [string, string];
+    const tokens: [string, string] = [randomBytes(24).toString("base64url"), randomBytes(24).toString("base64url")];
+    const table: Table = {
+      id: randomBytes(6).toString("hex"),
+      name: cleanName(input.name ?? "") ?? `${names[0]} gegen ${names[1]}`,
+      code: this.newCode(),
+      private: true,
+      game: GAMES.billard!,
+      hostName: names[0],
+      seats: [null, null],
+      status: "waiting",
+      state: null,
+      score: [0, 0],
+      nextStart: 0,
+      rematch: [false, false],
+      endNote: null,
+      reservation: {
+        ref: input.ref ?? null,
+        callbackUrl: input.callbackUrl ?? null,
+        players: [
+          { id: input.players[0].id, name: names[0] },
+          { id: input.players[1].id, name: names[1] }
+        ],
+        tokens,
+        createdAt: this.now(),
+        lastActiveAt: this.now(),
+        joined: false,
+        winner: null,
+        gamesPlayed: 0
+      }
+    };
+    this.tables.set(table.id, table);
+    this.seatTokens.set(tokens[0], { tableId: table.id, seat: 0 });
+    this.seatTokens.set(tokens[1], { tableId: table.id, seat: 1 });
+    return {
+      ...this.reservedInfo(table),
+      seats: [
+        { playerId: input.players[0].id, seat: 0, token: tokens[0] },
+        { playerId: input.players[1].id, seat: 1, token: tokens[1] }
+      ]
+    };
+  }
+
+  /** Stand eines reservierten Tisches; null, wenn es ihn nicht (mehr) gibt. */
+  reservedTable(id: string): ReservedTableInfo | null {
+    const table = this.tables.get(id);
+    return table?.reservation ? this.reservedInfo(table) : null;
+  }
+
+  /** Schließt einen reservierten Tisch (z. B. abgesagte Herausforderung). */
+  closeReserved(id: string): boolean {
+    const table = this.tables.get(id);
+    if (!table?.reservation) return false;
+    for (const pid of table.seats) {
+      const p = pid ? this.players.get(pid) : undefined;
+      if (!p) continue;
+      p.tableId = null;
+      p.conn?.send({ t: "table", table: null });
+      p.conn?.send({ t: "error", message: "Der Tisch wurde geschlossen" });
+    }
+    this.removeReserved(table);
+    return true;
+  }
+
+  private claimSeat(player: Player, claim: { tableId: string; seat: Seat }) {
+    const table = this.tables.get(claim.tableId);
+    if (!table?.reservation) return player.conn?.send({ t: "error", message: "Der Tisch ist nicht mehr da" });
+    if (player.tableId && player.tableId !== table.id) this.leaveTable(player, "hat den Tisch verlassen");
+    const current = table.seats[claim.seat];
+    if (current && current !== player.id) {
+      // Derselbe Platz auf einem anderen Gerät: das neue Gerät übernimmt
+      const old = this.players.get(current);
+      if (old) {
+        old.tableId = null;
+        old.conn?.send({ t: "table", table: null });
+        old.conn?.send({ t: "error", message: "Dein Platz wurde auf einem anderen Gerät übernommen" });
+      }
+    }
+    table.seats[claim.seat] = player.id;
+    player.tableId = table.id;
+    table.reservation.joined = true;
+    table.reservation.lastActiveAt = this.now();
+    if (table.seats[0] && table.seats[1] && table.status === "waiting") this.startGame(table);
+    this.broadcastTable(table);
+    this.broadcastLobby();
+  }
+
+  private gameFinished(table: Table, winner: Seat, reason: "won" | "forfeit") {
+    const r = table.reservation;
+    if (!r) return;
+    r.winner = r.players[winner].id;
+    r.gamesPlayed++;
+    r.lastActiveAt = this.now();
+    this.emit(table, "game.finished", reason);
+  }
+
+  private dropReserved(table: Table, type: "table.expired" | "table.closed") {
+    this.emit(table, type);
+    this.removeReserved(table);
+  }
+
+  private removeReserved(table: Table) {
+    for (const token of table.reservation?.tokens ?? []) this.seatTokens.delete(token);
+    this.tables.delete(table.id);
+    this.broadcastLobby();
+  }
+
+  private emit(table: Table, type: TableEvent["type"], reason?: TableEvent["reason"]) {
+    const event: TableEvent = { type, at: new Date(this.now()).toISOString(), table: this.reservedInfo(table) };
+    if (reason) event.reason = reason;
+    try {
+      this.onEvent(event, table.reservation?.callbackUrl ?? null);
+    } catch (error) {
+      console.error("[hub] Ereignis konnte nicht gemeldet werden", error);
+    }
+  }
+
+  private reservedInfo(table: Table): ReservedTableInfo {
+    const r = table.reservation!;
+    return {
+      id: table.id,
+      code: table.code,
+      ref: r.ref,
+      status: table.status,
+      players: r.players.map((p, i) => {
+        const pid = table.seats[i];
+        const live = pid ? this.players.get(pid) : undefined;
+        return { id: p.id, name: p.name, seat: i as Seat, connected: Boolean(live?.conn), score: table.score[i]! };
+      }),
+      winner: r.winner,
+      gamesPlayed: r.gamesPlayed
+    };
   }
 
   // ——— Tische ———
@@ -152,7 +372,8 @@ export class Hub {
       score: [0, 0],
       nextStart: 0,
       rematch: [false, false],
-      endNote: null
+      endNote: null,
+      reservation: null
     };
     this.tables.set(table.id, table);
     player.tableId = table.id;
@@ -167,6 +388,9 @@ export class Hub {
         ? [...this.tables.values()].find((t) => t.code === code.trim().toUpperCase())
         : undefined;
     if (!table || (tableId && table.private)) return player.conn?.send({ t: "error", message: "Tisch nicht gefunden" });
+    if (table.reservation && !table.seats.includes(player.id)) {
+      return player.conn?.send({ t: "error", message: "Dieser Tisch ist reserviert" });
+    }
     if (table.seats.includes(player.id)) return this.broadcastTable(table);
     const free = table.seats.indexOf(null);
     if (free < 0) return player.conn?.send({ t: "error", message: "Der Tisch ist schon voll" });
@@ -192,10 +416,16 @@ export class Hub {
       table.score[winner]++;
       table.status = "finished";
       table.endNote = `${player.name} ${why}`;
+      this.gameFinished(table, winner, "forfeit");
     } else if (table.status === "finished") {
       table.endNote = `${player.name} ${why}`;
     }
-    if (!table.seats[0] && !table.seats[1]) {
+    if (table.reservation) {
+      // Reservierte Tische behalten ihre Plätze und den Stand; man kommt über den Platz-Link zurück.
+      table.reservation.lastActiveAt = this.now();
+      table.rematch = [false, false];
+      this.broadcastTable(table);
+    } else if (!table.seats[0] && !table.seats[1]) {
       this.tables.delete(table.id);
     } else {
       // Wer bleibt, wartet auf einen neuen Gegner
@@ -254,6 +484,7 @@ export class Hub {
     if (result.kind === "won") {
       table.score[result.winner]++;
       table.status = "finished";
+      this.gameFinished(table, result.winner, "won");
     }
     for (const id of table.seats) {
       this.players.get(id ?? "")?.conn?.send({ t: "shot", seat, before, move, after: state, events });
@@ -305,7 +536,8 @@ export class Hub {
       state: table.state,
       score: [table.score[0], table.score[1]],
       rematch: [table.rematch[0], table.rematch[1]],
-      endNote: table.endNote
+      endNote: table.endNote,
+      reserved: table.reservation !== null
     };
   }
 

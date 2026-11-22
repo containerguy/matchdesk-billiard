@@ -3,6 +3,8 @@ import { defineConfig } from "vite";
 
 export default defineConfig({
   plugins: [react()],
+  // Relative Pfade, damit der Build auch unter einem Unterpfad läuft (z. B. /game-servers/billiard/)
+  base: "./",
   server: {
     port: 5173,
     host: true,

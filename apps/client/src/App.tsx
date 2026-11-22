@@ -19,6 +19,10 @@ const BALL_COLORS: Record<number, string> = {
   8: "#15171A"
 };
 
+/** Einbett-Modus (z. B. in Matchdesk): `?embed=1`, meist mit Platz-Link `?seat=…`. */
+const params = new URL(location.href).searchParams;
+const EMBED = params.get("embed") === "1";
+
 export function App() {
   const net = useMemo(() => new NetClient(), []);
   const ns = useSyncExternalStore(net.subscribe, net.getState);
@@ -27,19 +31,64 @@ export function App() {
   useEffect(() => {
     const url = new URL(location.href);
     const code = url.searchParams.get("t");
+    const seat = url.searchParams.get("seat");
     if (code) {
       net.joinOnConnect(code);
       url.searchParams.delete("t");
-      history.replaceState(null, "", url.pathname + url.search);
     }
+    if (seat) url.searchParams.delete("seat");
+    if (code || seat) history.replaceState(null, "", url.pathname + url.search);
+    if (seat) return net.connectSeat(seat);
     const saved = NetClient.savedName();
     if (saved) net.connect(saved);
   }, [net]);
 
+  useEmbedMessages(ns.table, ns.status);
+
+  if (EMBED && !ns.table) return <EmbedWaiting status={ns.status} error={ns.error} />;
   if (practice) return <PracticeScreen onExit={() => setPractice(false)} />;
   if (ns.status === "idle") return <NameScreen onSubmit={(name) => net.connect(name)} />;
   if (ns.table) return <TableScreen net={net} table={ns.table} />;
   return <LobbyScreen net={net} onPractice={() => setPractice(true)} />;
+}
+
+// ——— Einbettung ———
+
+/**
+ * Meldet dem einbettenden Fenster (z. B. Matchdesk) den Stand per `postMessage`:
+ * `ready` beim ersten Tisch, `status` bei jeder Änderung, `matchEnded` beim Partieende.
+ * Ziel ist nur die eigene Herkunft, weil das Spiel unter derselben Adresse eingebettet wird.
+ */
+function useEmbedMessages(table: TableInfo | null, status: string) {
+  const last = useRef<{ id: string; status: string; games: number } | null>(null);
+  useEffect(() => {
+    if (!EMBED || window.parent === window) return;
+    const post = (type: string, extra: Record<string, unknown> = {}) =>
+      window.parent.postMessage({ source: "bandenduell", type, ...extra }, location.origin);
+    if (!table) {
+      if (last.current && status === "online") post("closed");
+      last.current = null;
+      return;
+    }
+    const games = table.score[0] + table.score[1];
+    const payload = { status: table.status, score: table.score, mySeat: table.mySeat, seats: table.seats.map((s) => s?.name ?? null) };
+    if (!last.current || last.current.id !== table.id) post("ready", payload);
+    else post("status", payload);
+    if (table.status === "finished" && (last.current?.status !== "finished" || last.current.games !== games)) post("matchEnded", payload);
+    last.current = { id: table.id, status: table.status, games };
+  }, [table, status]);
+}
+
+function EmbedWaiting({ status, error }: { status: string; error: string | null }) {
+  return (
+    <div className="app embed">
+      <main className="center-screen">
+        <div className="card name-card">
+          {error ? <p className="warn">{error}</p> : <p className="muted">{status === "online" ? "Kein Tisch geöffnet." : "Verbinde mit dem Tisch …"}</p>}
+        </div>
+      </main>
+    </div>
+  );
 }
 
 // ——— Rahmen ———
@@ -259,7 +308,7 @@ function TableScreen({ net, table }: { net: NetClient; table: TableInfo }) {
     if (ns.error) game?.resync();
   }, [ns.error, game]);
 
-  const invite = `${location.origin}/?t=${table.code}`;
+  const invite = `${new URL(".", location.href).href}?t=${table.code}`;
   const opponentSeat: Seat | null = table.mySeat === null ? null : table.mySeat === 0 ? 1 : 0;
   const opponent = opponentSeat === null ? null : table.seats[opponentSeat];
 
@@ -267,7 +316,10 @@ function TableScreen({ net, table }: { net: NetClient; table: TableInfo }) {
     <>
       <section className="card">
         <h2>{table.name}</h2>
-        {table.status === "waiting" && (
+        {table.status === "waiting" && table.reserved && (
+          <p className="muted">Warte auf deinen Gegner. Die Einladung ist schon unterwegs.</p>
+        )}
+        {table.status === "waiting" && !table.reserved && (
           <>
             <p className="muted">Warte auf einen Gegner. Schick diesen Link oder den Code:</p>
             <InviteBox link={invite} code={table.code} />
@@ -297,11 +349,15 @@ function TableScreen({ net, table }: { net: NetClient; table: TableInfo }) {
   );
 
   return (
-    <div className="app">
-      <TopBar>
+    <div className={EMBED ? "app embed" : "app"}>
+      {EMBED ? (
         <ConnectionBadge status={ns.status} />
-        <span className="me">{ns.me?.name}</span>
-      </TopBar>
+      ) : (
+        <TopBar>
+          <ConnectionBadge status={ns.status} />
+          <span className="me">{ns.me?.name}</span>
+        </TopBar>
+      )}
       <ErrorToast net={net} message={ns.error} />
       <div className="body">
         <main className="play">
