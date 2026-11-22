@@ -1,11 +1,11 @@
 {
-  "name": "@spielhalle/billard",
+  "name": "@bandenduell/billard",
   "version": "0.1.0",
   "private": true,
   "type": "module",
   "main": "src/index.ts",
   "types": "src/index.ts",
   "dependencies": {
-    "@spielhalle/core": "0.1.0"
+    "@bandenduell/core": "0.1.0"
   }
 }

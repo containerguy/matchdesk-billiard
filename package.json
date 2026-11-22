@@ -3,10 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "workspaces": ["packages/*", "games/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "games/*",
+    "apps/*"
+  ],
   "scripts": {
-    "dev": "npm run dev -w @spielhalle/client",
-    "build": "npm run build -w @spielhalle/client",
+    "dev": "npm run dev -w @bandenduell/server & npm run dev -w @bandenduell/client",
+    "dev:client": "npm run dev -w @bandenduell/client",
+    "dev:server": "npm run dev -w @bandenduell/server",
+    "build": "npm run build -w @bandenduell/client",
+    "start": "npm run start -w @bandenduell/server",
     "test": "vitest run",
     "typecheck": "tsc -b"
   },
