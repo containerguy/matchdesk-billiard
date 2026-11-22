@@ -1,7 +1,7 @@
-import { POCKETS, TABLE, type Ball, type Vec } from "@spielhalle/billard";
+import { POCKETS, TABLE, type Ball, type Vec } from "@bandenduell/billard";
 import { Application, Container, Graphics, Text } from "pixi.js";
 import { useEffect, useRef } from "react";
-import type { HotseatGame } from "./hotseat";
+import type { TableController } from "./controller";
 
 /** Darstellung: Tuch 880 × 440 px, Bande 40 px, Gesamtfläche 960 × 520 px. */
 const RAIL = 40;
@@ -26,7 +26,7 @@ const AMBER = 0xf2a93b;
 const toView = (p: Vec) => ({ x: RAIL + p.x * S, y: RAIL + p.y * S });
 const toTable = (x: number, y: number): Vec => ({ x: (x - RAIL) / S, y: (y - RAIL) / S });
 
-export function TableView({ game }: { game: HotseatGame }) {
+export function TableView({ game }: { game: TableController }) {
   const host = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -71,29 +71,41 @@ export function TableView({ game }: { game: HotseatGame }) {
           drawStick(stick, snap.phase === "aiming" ? snap : null, balls);
         };
 
-        app.ticker.add(() => {
-          game.tick();
+        app.ticker.add((ticker) => {
+          game.tick(ticker.deltaMS);
           render();
         });
+        const onHidden = () => {
+          if (document.hidden) game.fastForward();
+        };
+        document.addEventListener("visibilitychange", onHidden);
 
         const point = (ev: PointerEvent) => {
           const rect = app.canvas.getBoundingClientRect();
           return toTable(((ev.clientX - rect.left) / rect.width) * VIEW_W, ((ev.clientY - rect.top) / rect.height) * VIEW_H);
         };
-        const onMove = (ev: PointerEvent) => game.pointerMove(point(ev));
+        const isTouch = (ev: PointerEvent) => ev.pointerType !== "mouse";
+        const onMove = (ev: PointerEvent) => game.pointerMove(point(ev), isTouch(ev));
         const onDown = (ev: PointerEvent) => {
+          ev.preventDefault();
           app.canvas.setPointerCapture(ev.pointerId);
-          game.pointerDown(point(ev));
+          game.pointerDown(point(ev), isTouch(ev));
         };
-        const onUp = () => game.pointerUp();
+        const onUp = (ev: PointerEvent) => game.pointerUp(isTouch(ev));
+        const onCancel = () => game.cancelDrag();
         app.canvas.addEventListener("pointermove", onMove);
         app.canvas.addEventListener("pointerdown", onDown);
         app.canvas.addEventListener("pointerup", onUp);
+        app.canvas.addEventListener("pointercancel", onCancel);
         app.canvas.style.touchAction = "none";
+        app.canvas.style.width = "100%";
+        app.canvas.style.height = "auto";
         cleanup = () => {
           app.canvas.removeEventListener("pointermove", onMove);
           app.canvas.removeEventListener("pointerdown", onDown);
           app.canvas.removeEventListener("pointerup", onUp);
+          app.canvas.removeEventListener("pointercancel", onCancel);
+          document.removeEventListener("visibilitychange", onHidden);
         };
       });
 
@@ -110,7 +122,7 @@ export function TableView({ game }: { game: HotseatGame }) {
       className="table-view"
       role="img"
       aria-label="Billardtisch in Draufsicht. Maus bewegen zum Zielen, Maustaste halten und ziehen für die Stoßstärke, loslassen zum Stoßen."
-      style={{ width: VIEW_W, height: VIEW_H }}
+      style={{ aspectRatio: `${VIEW_W} / ${VIEW_H}` }}
     />
   );
 }
