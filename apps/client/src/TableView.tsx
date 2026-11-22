@@ -79,6 +79,8 @@ export function TableView({ game }: { game: TableController }) {
           if (document.hidden) game.fastForward();
         };
         document.addEventListener("visibilitychange", onHidden);
+        // Lesender Zugriff auf den sichtbaren Spielstand, für Fehlersuche und End-to-End-Tests
+        (window as unknown as { bandenduellState?: () => unknown }).bandenduellState = () => game.getSnapshot().state;
 
         const point = (ev: PointerEvent) => {
           const rect = app.canvas.getBoundingClientRect();

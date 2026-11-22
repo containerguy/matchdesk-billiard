@@ -12,18 +12,19 @@ Plan und Architektur: [Online-Billard: Recherche und Umsetzungsplan](https://cla
 - **8-Ball-Regeln:** Anstoß, offener Tisch, Volle gegen Halbe, Fouls mit Kugel in der Hand, Sieg und Niederlage über die 8.
 - **Online:** Spielserver mit Lobby, öffentlichen und privaten Tischen (Code und Einladungslink), Chat, Revanche, Wiederverbinden nach Verbindungsabbruch (60 s Frist). Der Server rechnet jeden Stoß selbst, beide Seiten sehen denselben Ablauf und das Zielen des Gegners.
 - **Smartphone:** Touch-Steuerung (Finger zielt, Regler für die Stärke, Knopf „Stoß“) und Layout für Hoch- und Querformat.
-- **Allein üben:** lokaler Tisch ohne Gegner.
+- **Solo:** Partie gegen den Computer in drei Stufen (Leicht, Mittel, Schwer) oder freies Üben ohne Gegner. Der Computergegner läuft im Browser und braucht keinen Server.
 
-Als Nächstes: Computergegner für Solo-Partien, Rangliste, Anbindung an Matchdesk.
+Als Nächstes: Anbindung an Matchdesk, Rangliste.
 
 ## Aufbau
 
 ```text
 packages/core      Spiel-Schnittstelle (GameDefinition)
 packages/protocol  Nachrichten zwischen Client und Server (zod-geprüft)
-games/billard      Physik, Dreieck, Zielhilfe, 8-Ball-Regeln (rein, deterministisch, getestet)
+games/billard      Physik, Dreieck, Zielhilfe, 8-Ball-Regeln, Computergegner (rein, deterministisch, getestet)
 apps/server        Express + WebSocket: Lobby, Tische, Schiedsrichter
 apps/client        Vite + React + PixiJS: Lobby, Tisch, Steuerung
+e2e                End-to-End-Tests (Playwright)
 ```
 
 ## Entwickeln
@@ -33,9 +34,16 @@ npm install
 npm run dev        # Server auf :3000, Client auf http://localhost:5173
 npm test           # Unit-Tests (Vitest)
 npm run typecheck
+npm run test:e2e   # End-to-End-Tests im Browser (Playwright)
 ```
 
 Der Client ist im Entwicklungsmodus auch im lokalen Netz erreichbar (`http://<IP-des-Rechners>:5173`), so lässt sich ein zweites Gerät oder ein Smartphone direkt testen.
+
+## End-to-End-Tests
+
+Die Tests unter `e2e/` bauen den Client, starten den echten Spielserver und spielen im Browser: eine Online-Partie zwischen Desktop und Smartphone-Ansicht mit Einladungslink, Stößen, Chat und Aufgabe, eine Online-Partie bis zum Ende mit Revanche und eine Solo-Partie gegen den Computer bis zum Ende. Sie laufen in der CI als eigener Check `e2e` und sind Pflicht: ohne grüne E2E-Tests wird nicht gemergt. Wer eine Funktion ändert oder ergänzt, die Spieler bedienen, ergänzt den passenden Test.
+
+Einmalig vor dem ersten lokalen Lauf: `npx playwright install chromium`.
 
 ## Betreiben
 

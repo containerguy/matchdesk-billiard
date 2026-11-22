@@ -876,3 +876,12 @@ input[type="range"]::-moz-range-thumb {
   right: 8px;
   z-index: 5;
 }
+
+.segmented.opponent {
+  margin-bottom: 10px;
+}
+
+.segmented.opponent button {
+  flex: 1;
+  padding: 0 8px;
+}
