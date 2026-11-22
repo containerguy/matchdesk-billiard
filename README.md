@@ -62,3 +62,30 @@ Für den Betrieb im Internet einen Reverse-Proxy mit HTTPS davorsetzen, der WebS
 - Touch: Finger auf dem Tisch dreht den Queue, Stärke am Regler, dann „Stoß“.
 - Effet: auf der kleinen weißen Kugel den Treffpunkt wählen.
 - Zielhilfe „Profi“ zeigt nur noch die Linie bis zur Geisterkugel.
+
+## Einbindung in Matchdesk und andere Plattformen
+
+Der Server bietet unter `<BASE_PATH>/api/integrations/v1` eine kleine HTTP-Schnittstelle, mit der eine
+Plattform wie Matchdesk Partien zwischen ihren Benutzern anlegt. Das Spiel läuft dann eingebettet in der
+Plattform (`?embed=1`), jeder Spieler kommt über seinen persönlichen Platz-Link (`?seat=<token>`) an den Tisch.
+
+| Umgebungsvariable | Bedeutung |
+| --- | --- |
+| `BASE_PATH` | Unterpfad hinter dem Reverse Proxy, z. B. `/game-servers/billiard` (leer = Wurzel) |
+| `INTEGRATION_API_KEY` | Schlüssel für `Authorization: Bearer …`; ohne ihn ist die Schnittstelle aus |
+| `INTEGRATION_WEBHOOK_SECRET` | Geheimnis für die HMAC-Signatur der Ereignisse an die Plattform |
+| `FRAME_ANCESTORS` | wer das Spiel einbetten darf (CSP `frame-ancestors`), Standard `'self'` |
+
+| Methode und Pfad | Zweck |
+| --- | --- |
+| `POST /tables` | reservierten Tisch anlegen: `{ players: [{id, name}, {id, name}], ref?, name?, callbackUrl? }`, Antwort mit `seats[].token` |
+| `GET /tables/:id` | Stand: Status, Spieler, Punkte, Sieger der letzten Partie |
+| `DELETE /tables/:id` | Tisch schließen (z. B. abgesagte Herausforderung) |
+
+Reservierte Tische haben zwei feste Plätze, verfallen nach 30 Minuten ohne Beitritt und werden nach zwei
+Stunden ohne Spieler geschlossen. Ereignisse (`game.finished`, `table.expired`, `table.closed`) gehen als
+`POST` an die `callbackUrl`, mit den Headern `X-Bandenduell-Timestamp` und
+`X-Bandenduell-Signature: sha256=HMAC(secret, "<timestamp>.<body>")`.
+
+Eingebettet meldet das Spiel dem umgebenden Fenster per `postMessage` (nur an die eigene Herkunft)
+`{ source: "bandenduell", type: "ready" | "status" | "matchEnded" | "closed", status, score, mySeat, seats }`.

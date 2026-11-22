@@ -10,7 +10,13 @@ import { z } from "zod";
 const vecSchema = z.object({ x: z.number().finite(), y: z.number().finite() });
 
 export const clientMessageSchema = z.discriminatedUnion("t", [
-  z.object({ t: z.literal("hello"), name: z.string(), token: z.string().max(64).optional() }),
+  z.object({
+    t: z.literal("hello"),
+    name: z.string(),
+    token: z.string().max(64).optional(),
+    /** Platz-Token eines reservierten Tisches (aus einer Integration wie Matchdesk); setzt Namen und Platz. */
+    seat: z.string().max(64).optional()
+  }),
   z.object({ t: z.literal("createTable"), name: z.string().max(40), private: z.boolean() }),
   z.object({ t: z.literal("joinTable"), tableId: z.string().max(40).optional(), code: z.string().max(12).optional() }),
   z.object({ t: z.literal("leaveTable") }),
@@ -51,6 +57,8 @@ export type TableView = {
   rematch: [boolean, boolean];
   /** Warum die letzte Partie endete, falls nicht regulär (z. B. Aufgabe). */
   endNote: string | null;
+  /** Reservierter Tisch einer Integration: feste Plätze, kein Einladungslink. */
+  reserved: boolean;
 };
 
 export type OnlinePlayer = { id: string; name: string; status: "lobby" | "waiting" | "playing" };

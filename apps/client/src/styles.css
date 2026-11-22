@@ -865,3 +865,14 @@ input[type="range"]::-moz-range-thumb {
     display: none;
   }
 }
+
+/* Einbett-Modus (z. B. in Matchdesk): keine Kopfzeile, Spiel füllt den Rahmen */
+.app.embed {
+  position: relative;
+}
+.app.embed > .conn-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+}

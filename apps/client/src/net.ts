@@ -27,6 +27,18 @@ function storage(key: string, value?: string | null): string | null {
   return null;
 }
 
+/**
+ * WebSocket-Adresse relativ zur Seite, damit das Spiel auch unter einem Unterpfad läuft
+ * (z. B. `/game-servers/billiard/` hinter einem Reverse Proxy).
+ */
+export function socketUrl(loc: { href: string } = location): string {
+  const url = new URL("ws", loc.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  url.search = "";
+  url.hash = "";
+  return url.toString();
+}
+
 type GameListener = (msg: Extract<ServerMessage, { t: "shot" | "aim" }>) => void;
 
 /** Verbindung zum Spielserver mit automatischem Wiederverbinden. */
@@ -37,6 +49,7 @@ export class NetClient {
   private retry = 0;
   private name = "";
   private pendingCode: string | null = null;
+  private seat: string | null = null;
   private stopped = false;
   state: NetState = { status: "idle", me: null, tables: [], online: [], table: null, lobbyChat: [], tableChat: [], error: null };
 
@@ -67,6 +80,14 @@ export class NetClient {
     this.open();
   }
 
+  /** Mit Platz-Link eines reservierten Tisches verbinden (Name und Platz kommen vom Server). */
+  connectSeat(seat: string) {
+    this.seat = seat;
+    this.name = "";
+    this.stopped = false;
+    this.open();
+  }
+
   send(msg: ClientMessage) {
     if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(msg));
   }
@@ -77,12 +98,13 @@ export class NetClient {
 
   private open() {
     this.patch({ status: "connecting" });
-    const proto = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${proto}//${location.host}/ws`);
+    const ws = new WebSocket(socketUrl());
     this.ws = ws;
     ws.onopen = () => {
       this.retry = 0;
-      ws.send(JSON.stringify({ t: "hello", name: this.name, token: storage(TOKEN_KEY) ?? undefined } satisfies ClientMessage));
+      ws.send(
+        JSON.stringify({ t: "hello", name: this.name, token: storage(TOKEN_KEY) ?? undefined, seat: this.seat ?? undefined } satisfies ClientMessage)
+      );
     };
     ws.onmessage = (ev) => {
       let msg: ServerMessage;
