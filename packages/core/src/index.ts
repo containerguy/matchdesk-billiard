@@ -1,0 +1,36 @@
+/**
+ * Spiel-Schnittstelle der Spielhalle.
+ *
+ * Lobby, Tische, Chat, Rangliste und Integrations-API kennen kein bestimmtes Spiel.
+ * Jedes Spiel (Billard, später das Schiebespiel) liefert eine `GameDefinition`,
+ * über die der Server Züge prüft und anwendet. Alles darin ist rein und deterministisch,
+ * damit Server und Client dieselbe Logik nutzen können.
+ */
+
+/** Sitzplatz am Tisch: 0 oder 1 (alle Spiele sind vorerst für zwei Spieler). */
+export type Seat = 0 | 1;
+
+export type GameResult =
+  | { kind: "running" }
+  | { kind: "won"; winner: Seat; reason: string };
+
+export type MoveCheck = { ok: true } | { ok: false; reason: string };
+
+export interface GameDefinition<State, Move, Event> {
+  /** Stabile Kennung, z. B. `billard`. Taucht in Tischen, Rangliste und API auf. */
+  readonly id: string;
+  readonly name: string;
+  readonly players: 2;
+  createInitialState(options: { seed: number; startingSeat: Seat }): State;
+  /** Wer ist am Zug? */
+  currentSeat(state: State): Seat;
+  /** Prüft einen Zug, ohne den Zustand zu ändern. */
+  checkMove(state: State, seat: Seat, move: Move): MoveCheck;
+  /** Wendet einen geprüften Zug an und liefert den neuen Zustand und was passiert ist. */
+  applyMove(state: State, seat: Seat, move: Move): { state: State; events: Event[] };
+  result(state: State): GameResult;
+}
+
+export function otherSeat(seat: Seat): Seat {
+  return seat === 0 ? 1 : 0;
+}

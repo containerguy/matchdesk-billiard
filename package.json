@@ -1,0 +1,17 @@
+{
+  "name": "matchdesk-billiard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "workspaces": ["packages/*", "games/*", "apps/*"],
+  "scripts": {
+    "dev": "npm run dev -w @spielhalle/client",
+    "build": "npm run build -w @spielhalle/client",
+    "test": "vitest run",
+    "typecheck": "tsc -b"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
