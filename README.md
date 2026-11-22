@@ -61,6 +61,10 @@ Oder mit Docker:
 docker compose up -d --build   # http://localhost:3000
 ```
 
+Fertige Images baut der Workflow „Image“ bei jedem Push auf `main`: `ghcr.io/containerguy/matchdesk-billiard:latest`
+und `:sha-<commit>`, bei Tags `v1.2.3` zusätzlich `:1.2.3`. In PRs wird das Image nur gebaut und unter
+`/game-servers/billiard` kurz gestartet (Rauchtest).
+
 Für den Betrieb im Internet einen Reverse-Proxy mit HTTPS davorsetzen, der WebSocket-Verbindungen auf `/ws` durchreicht. `GET /health` meldet den Zustand. Der Spielstand liegt im Arbeitsspeicher, ein Neustart beendet laufende Partien.
 
 ## Bedienung

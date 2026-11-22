@@ -1,5 +1,7 @@
 services:
   bandenduell:
+    # Fertiges Image von GitHub (Workflow „Image“); ohne Zugriff darauf: `docker compose build`
+    image: ghcr.io/containerguy/matchdesk-billiard:latest
     build: .
     restart: unless-stopped
     ports:
