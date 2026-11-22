@@ -40,7 +40,7 @@ export type Shot = {
 
 export type PhysicsEvent =
   | { kind: "ballContact"; a: number; b: number }
-  | { kind: "cushion"; ball: number }
+  | { kind: "cushion"; ball: number; pos: Vec }
   | { kind: "pocket"; ball: number; pocket: number };
 
 export type Simulation = {
@@ -186,7 +186,7 @@ function cushion(b: Ball, sim: Simulation & { spin: SpinState }) {
     hit = true;
   }
   if (!hit) return;
-  sim.events.push({ kind: "cushion", ball: b.id });
+  sim.events.push({ kind: "cushion", ball: b.id, pos: { ...b.pos } });
   if (b.id === 0 && sim.spin.side !== 0) {
     // Seitliches Effet: ein Teil der Geschwindigkeit dreht sich beim Abprall
     const speed = vec.len(b.vel);

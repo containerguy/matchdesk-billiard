@@ -7,11 +7,11 @@ export const TABLE = {
   height: 1120,
   ballRadius: 28.575,
   /** Länge der Öffnung an den Ecktaschen, gemessen entlang jeder Bande ab der Ecke. */
-  cornerMouth: 80,
+  cornerMouth: 72,
   /** Halbe Breite der Mitteltaschen-Öffnung. */
-  sideMouthHalf: 62,
+  sideMouthHalf: 54,
   /** Fangradius der Taschen um ihren Mittelpunkt. */
-  pocketRadius: 62,
+  pocketRadius: 52,
   /** x-Position der Kopflinie (Anstoßbereich links davon). */
   headStringX: 560
 } as const;

@@ -108,7 +108,7 @@ export function seeded(seed: number) {
   };
 }
 
-type VisibleState = { balls: Array<{ id: number; pos: { x: number; y: number }; potted: boolean }>; ballInHand: boolean; isBreak: boolean };
+type VisibleState = { balls: Array<{ id: number; pos: { x: number; y: number }; potted: boolean }>; ballInHand: boolean; isBreak: boolean; fromKitchen?: boolean };
 
 /** Der Spielstand, wie ihn dieser Spieler gerade sieht. */
 export async function visibleState(page: Page) {
@@ -135,5 +135,5 @@ export async function shootAtEight(page: Page) {
   const pocket = [...POCKETS].sort((a, b) => Math.hypot(a.x - eight.x, a.y - eight.y) - Math.hypot(b.x - eight.x, b.y - eight.y))[0]!;
   const length = Math.hypot(pocket.x - eight.x, pocket.y - eight.y) || 1;
   const behind = { x: eight.x - ((pocket.x - eight.x) / length) * 220, y: eight.y - ((pocket.y - eight.y) / length) * 220 };
-  await shoot(page, { place: state.isBreak ? { x: 400, y: 560 } : behind, aimAt: eight, power: 1 });
+  await shoot(page, { place: state.isBreak || state.fromKitchen ? { x: 400, y: 560 } : behind, aimAt: eight, power: 1 });
 }

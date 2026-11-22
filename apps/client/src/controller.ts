@@ -278,9 +278,13 @@ export abstract class TableController {
       case "groupsAssigned":
         return [`${n[e.seat]} spielt ${e.group === "solids" ? "die Vollen" : "die Halben"}, ${n[otherSeat(e.seat)]} ${e.group === "solids" ? "die Halben" : "die Vollen"}.`];
       case "foul":
-        return [`Foul von ${n[e.seat]}: ${e.reason}. ${n[otherSeat(e.seat)]} hat Kugel in der Hand.`];
+        return [
+          `Foul von ${n[e.seat]}: ${e.reason}. ${n[otherSeat(e.seat)]} hat Kugel in der Hand${this.snapshot.state.isBreak && e.reason === "weiße versenkt" ? " im Kopffeld" : ""}.`
+        ];
       case "eightRespotted":
         return ["Die 8 fiel beim Anstoß und wird zurückgesetzt."];
+      case "rebreak":
+        return [`Ungültiger Anstoß von ${n[otherSeat(e.seat)]} (${e.reason}). Es wird neu aufgebaut, ${n[e.seat]} stößt an.`];
       case "turn":
         return [];
       case "won":

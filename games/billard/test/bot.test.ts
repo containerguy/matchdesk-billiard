@@ -19,7 +19,7 @@ function straightIn(): BillardState {
   const ball = (id: number, x: number, y: number, potted = false): Ball => ({ id, pos: { x, y }, vel: { x: 0, y: 0 }, potted });
   const balls = [ball(0, 1400, 700), ball(1, 1900, 950), ball(8, 400, 200), ball(9, 300, 900)];
   for (let id = 2; id <= 15; id++) if (id !== 8 && id !== 9) balls.push(ball(id, 0, 0, true));
-  return { balls, turn: 0, groups: ["solids", "stripes"], ballInHand: false, isBreak: false, winner: null, winReason: null, shots: 5 };
+  return { balls, turn: 0, groups: ["solids", "stripes"], ballInHand: false, isBreak: false, fromKitchen: false, winner: null, winReason: null, shots: 5 };
 }
 
 describe("Computergegner", () => {
@@ -54,5 +54,14 @@ describe("Computergegner", () => {
   it("spielt eine ganze Partie mit gültigen Stößen zu Ende", () => {
     expect(playOut(["hard", "medium"], 4711).winner).not.toBeNull();
     expect(playOut(["easy", "easy"], 99).winner).not.toBeNull();
+  }, 60_000);
+
+  it("spielt aus dem Kopffeld keine Kugel an, die selbst im Kopffeld liegt", () => {
+    const state = { ...straightIn(), ballInHand: true, fromKitchen: true };
+    state.balls = state.balls.map((b) => (b.id === 1 ? { ...b, pos: { x: 300, y: 300 } } : b.id === 2 ? { ...b, pos: { x: 1500, y: 500 }, potted: false } : b));
+    const move = chooseBotMove(state, 0, "hard", 3);
+    expect(move.cueBallPos!.x).toBeLessThanOrEqual(TABLE.headStringX);
+    const { events } = applyMove(state, 0, move);
+    expect(events.some((e) => e.kind === "foul")).toBe(false);
   });
 });

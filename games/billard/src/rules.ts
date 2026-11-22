@@ -20,6 +20,11 @@ export type BillardState = {
   ballInHand: boolean;
   /** Nächster Stoß ist der Anstoß (weiße Kugel nur hinter der Kopflinie). */
   isBreak: boolean;
+  /**
+   * Kugel in der Hand nur im Kopffeld (nach einer versenkten Weißen beim Anstoß): die Weiße liegt
+   * hinter der Kopflinie und darf keine Kugel direkt anspielen, die selbst im Kopffeld liegt.
+   */
+  fromKitchen: boolean;
   winner: Seat | null;
   winReason: string | null;
   shots: number;
@@ -31,13 +36,23 @@ export type BillardMove = {
   cueBallPos?: Vec;
 };
 
-export type FoulReason = "weiße versenkt" | "keine Kugel getroffen" | "falsche Kugel zuerst" | "keine Bande nach dem Treffer";
+export type FoulReason =
+  | "weiße versenkt"
+  | "keine Kugel getroffen"
+  | "falsche Kugel zuerst"
+  | "keine Bande nach dem Treffer"
+  | "Kugel im Kopffeld direkt angespielt";
+
+/** So viele Objektkugeln müssen beim Anstoß eine Bande erreichen, wenn keine Kugel fällt. */
+export const BREAK_MIN_RAIL_BALLS = 4;
 
 export type BillardEvent =
   | { kind: "potted"; ball: number; seat: Seat }
   | { kind: "groupsAssigned"; seat: Seat; group: Group }
   | { kind: "foul"; seat: Seat; reason: FoulReason }
   | { kind: "eightRespotted" }
+  /** Ungültiger Anstoß: neu aufgebaut, `seat` stößt an. */
+  | { kind: "rebreak"; seat: Seat; reason: "Dreieck nicht getroffen" | "zu wenige Kugeln an der Bande" }
   | { kind: "turn"; seat: Seat }
   | { kind: "won"; seat: Seat; reason: string };
 
@@ -54,6 +69,7 @@ export function createInitialState(options: { seed: number; startingSeat: Seat }
     groups: [null, null],
     ballInHand: true,
     isBreak: true,
+    fromKitchen: false,
     winner: null,
     winReason: null,
     shots: 0
@@ -64,7 +80,7 @@ export function createInitialState(options: { seed: number; startingSeat: Seat }
 export function isValidCuePlacement(state: BillardState, pos: Vec): boolean {
   const r = TABLE.ballRadius;
   if (pos.x < r || pos.y < r || pos.x > TABLE.width - r || pos.y > TABLE.height - r) return false;
-  if (state.isBreak && pos.x > TABLE.headStringX) return false;
+  if ((state.isBreak || state.fromKitchen) && pos.x > TABLE.headStringX) return false;
   return state.balls.every((b) => b.id === 0 || b.potted || vec.dist(b.pos, pos) >= 2 * r);
 }
 
@@ -122,11 +138,29 @@ export function judgeShot(
   const railAfterContact =
     firstContactIndex >= 0 && physics.slice(firstContactIndex + 1).some((e) => e.kind === "cushion" || e.kind === "pocket");
 
+  // Ungültiger Anstoß: fällt keine Kugel, müssen genug Kugeln eine Bande erreichen. Sonst wird neu
+  // aufgebaut und der Gegner stößt an.
+  if (before.isBreak && !potted.includes(0) && pottedObjects.length === 0) {
+    const railBalls = new Set(physics.flatMap((e) => (e.kind === "cushion" && e.ball !== 0 ? [e.ball] : [])));
+    if (firstContact === null || railBalls.size < BREAK_MIN_RAIL_BALLS) {
+      const reason = firstContact === null ? "Dreieck nicht getroffen" : "zu wenige Kugeln an der Bande";
+      return {
+        state: {
+          ...createInitialState({ seed: rackSeed(before), startingSeat: opponent }),
+          groups,
+          shots: before.shots + 1
+        },
+        events: [{ kind: "rebreak", seat: opponent, reason }]
+      };
+    }
+  }
+
   for (const id of pottedObjects) events.push({ kind: "potted", ball: id, seat });
 
   let foul: FoulReason | null = null;
   if (potted.includes(0)) foul = "weiße versenkt";
   else if (firstContact === null) foul = "keine Kugel getroffen";
+  else if (before.fromKitchen && playedInsideKitchen(before, firstContact, physics.slice(0, firstContactIndex))) foul = "Kugel im Kopffeld direkt angespielt";
   else if (!before.isBreak && !isLegalFirstContact(firstContact, ownGroup, onEight)) foul = "falsche Kugel zuerst";
   else if (!before.isBreak && !railAfterContact) foul = "keine Bande nach dem Treffer";
 
@@ -180,6 +214,7 @@ export function judgeShot(
       groups,
       ballInHand: foul !== null && winner === null,
       isBreak: false,
+      fromKitchen: before.isBreak && foul === "weiße versenkt" && winner === null,
       winner,
       winReason,
       shots: before.shots + 1
@@ -192,6 +227,23 @@ function isLegalFirstContact(id: number, ownGroup: Group | null, onEight: boolea
   if (ownGroup === null) return id !== 8;
   if (onEight) return id === 8;
   return groupOf(id) === ownGroup;
+}
+
+/**
+ * Wurde eine Kugel im Kopffeld angespielt, ohne dass die Weiße das Kopffeld vorher verlassen hat?
+ * Die Weiße gilt als draußen gewesen, wenn sie vor dem Treffer eine Bande jenseits der Kopflinie berührt hat.
+ */
+function playedInsideKitchen(before: BillardState, firstContact: number, beforeContact: readonly PhysicsEvent[]) {
+  const target = before.balls.find((b) => b.id === firstContact);
+  if (!target || target.pos.x >= TABLE.headStringX) return false;
+  return !beforeContact.some((e) => e.kind === "cushion" && e.ball === 0 && e.pos.x > TABLE.headStringX);
+}
+
+/** Fester Seed für den Neuaufbau nach einem ungültigen Anstoß, abgeleitet aus dem Stand davor. */
+function rackSeed(before: BillardState) {
+  let h = (before.shots + 1) * 2654435761;
+  for (const b of before.balls) h = (Math.imul(h ^ Math.round(b.pos.x * 10), 16777619) ^ Math.round(b.pos.y * 10)) >>> 0;
+  return h >>> 0;
 }
 
 /** Setzt die 8 auf den Fußpunkt zurück, notfalls ein Stück weiter Richtung Fußbande. */
