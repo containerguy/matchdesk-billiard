@@ -39,7 +39,7 @@ type Candidate = { move: BillardMove; geometry: number };
 export function chooseBotMove(state: BillardState, seat: Seat, level: BotLevel, seed: number): BillardMove {
   const cfg = LEVELS[level];
   const rnd = random(seed);
-  if (state.isBreak) return breakShot(cfg, rnd);
+  if (state.isBreak) return breakShot(state, seat, cfg, rnd);
 
   const candidates = potCandidates(state, seat, cfg);
   const scored = candidates
@@ -56,12 +56,28 @@ export function chooseBotMove(state: BillardState, seat: Seat, level: BotLevel, 
   return withNoise(chosen.move, cfg, rnd);
 }
 
-function breakShot(cfg: LevelConfig, rnd: () => number): BillardMove {
+function breakShot(state: BillardState, seat: Seat, cfg: LevelConfig, rnd: () => number): BillardMove {
+  // Auch mit der Streuung der Stufe soll der Anstoß gültig sein: durchrechnen und notfalls neu ansetzen
+  let move = breakAttempt(cfg, rnd);
+  for (let attempt = 0; attempt < 8 && !isLegalBreak(state, seat, move); attempt++) move = breakAttempt(cfg, rnd);
+  return move;
+}
+
+function breakAttempt(cfg: LevelConfig, rnd: () => number): BillardMove {
   const cueBallPos = { x: TABLE.headStringX - 60, y: TABLE.height / 2 + (rnd() - 0.5) * 240 };
   const angle = Math.atan2(FOOT_SPOT.y - cueBallPos.y, FOOT_SPOT.x - cueBallPos.x);
-  // Kräftig genug für einen gültigen Anstoß, auch nach der Streuung der Stufe
   const move = withNoise({ shot: { angle, power: 0.95, spin: { x: 0, y: 0 } }, cueBallPos }, cfg, rnd);
   return { ...move, shot: { ...move.shot, power: Math.max(0.85, move.shot.power) } };
+}
+
+function isLegalBreak(state: BillardState, seat: Seat, move: BillardMove): boolean {
+  const balls = cloneBalls(state.balls);
+  const cue = balls.find((b) => b.id === 0)!;
+  cue.pos = { ...move.cueBallPos! };
+  cue.potted = false;
+  const sim = simulateShot(balls, move.shot);
+  const { events } = judgeShot({ ...state, balls }, seat, sim.balls, sim.events);
+  return !events.some((e) => e.kind === "rebreak" || e.kind === "foul");
 }
 
 /** Kugeln, die der Spieler als erste treffen darf. */
