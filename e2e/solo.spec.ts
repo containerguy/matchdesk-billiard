@@ -38,7 +38,8 @@ test("Der Computer stößt sichtbar in Echtzeit, freies Üben bleibt möglich", 
   await shoot(page, { place: { x: 400, y: 560 }, aimAt: { x: 400, y: 100 }, power: 0.2, touch: true });
   await expect(gameLog(page).last()).toContainText("Ungültiger Anstoß von Spieler (Dreieck nicht getroffen)");
   await expect(gameLog(page).last()).toContainText("Computer (Leicht) stößt an");
-  await expect(hint(page)).toHaveText(HINT.opponent);
+  // Das Zeitfenster vor dem Stoß des Computers ist kurz: er darf hier auch schon stoßen
+  await expect(hint(page)).toHaveText(new RegExp(`${escape(HINT.opponent)}|${escape(HINT.rolling)}`));
   expect((await visibleState(page)).isBreak).toBe(true);
 
   // Der Computer setzt die Weiße ins Kopffeld und stößt sichtbar an; sein Anstoß ist gültig
@@ -54,3 +55,7 @@ test("Der Computer stößt sichtbar in Echtzeit, freies Üben bleibt möglich", 
   await expect(hint(page)).toHaveText(/Kopflinie/);
   expect(errors).toEqual([]);
 });
+
+function escape(text: string) {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}

@@ -28,6 +28,18 @@ describe("Computergegner", () => {
     expect(chooseBotMove(state, 0, "medium", 7)).toEqual(chooseBotMove(state, 0, "medium", 7));
   });
 
+  it("stößt auf jeder Stufe gültig an", () => {
+    let illegal = 0;
+    for (const level of ["easy", "medium", "hard"] as const) {
+      for (let seed = 0; seed < 40; seed++) {
+        const state = createInitialState({ seed, startingSeat: 1 });
+        const { events } = applyMove(state, 1, chooseBotMove(state, 1, level, seed * 31 + 5));
+        if (events.some((e) => e.kind === "rebreak" || e.kind === "foul")) illegal++;
+      }
+    }
+    expect(illegal).toBe(0);
+  }, 60_000);
+
   it("setzt die Weiße beim Anstoß hinter die Kopflinie und trifft das Dreieck", () => {
     const state = createInitialState({ seed: 3, startingSeat: 1 });
     const move = chooseBotMove(state, 1, "easy", 1);
