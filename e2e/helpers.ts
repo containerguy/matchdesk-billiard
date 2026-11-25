@@ -137,3 +137,9 @@ export async function shootAtEight(page: Page) {
   const behind = { x: eight.x - ((pocket.x - eight.x) / length) * 220, y: eight.y - ((pocket.y - eight.y) / length) * 220 };
   await shoot(page, { place: state.isBreak || state.fromKitchen ? { x: 400, y: 560 } : behind, aimAt: eight, power: 1 });
 }
+
+/** Lage einer Kugel im Raum (Drehmatrix), wie sie gerade gezeichnet wird. */
+export async function ballRoll(page: Page, id: number): Promise<number[]> {
+  await page.waitForFunction((ball) => (window as unknown as { bandenduellRoll?: (id: number) => unknown }).bandenduellRoll?.(ball) != null, id);
+  return page.evaluate((ball) => (window as unknown as { bandenduellRoll: (id: number) => number[] }).bandenduellRoll(ball), id);
+}

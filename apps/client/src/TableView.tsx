@@ -1,6 +1,7 @@
 import { POCKETS, TABLE, type Ball, type Vec } from "@bandenduell/billard";
-import { Application, Container, Graphics, Text } from "pixi.js";
+import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
+import { ballLook, initialOrientation, paintBall, roll, type Mat3 } from "./ballRoll";
 import type { TableController } from "./controller";
 
 /** Darstellung: Tuch 880 × 440 px, Bande 40 px, Gesamtfläche 960 × 520 px. */
@@ -20,7 +21,6 @@ const COLORS: Record<number, number> = {
   7: 0x8e2b34,
   8: 0x15171a
 };
-const IVORY = 0xf4f1ea;
 const AMBER = 0xf2a93b;
 
 /** Dauer der Einloch-Animation in Millisekunden. */
@@ -57,7 +57,9 @@ export function TableView({ game }: { game: TableController }) {
         const ballLayer = new Container();
         const stick = new Graphics();
         app.stage.addChild(guide, ballLayer, stick);
-        const sprites = new Map<number, Container>();
+        const sprites = new Map<number, BallSprite>();
+        /** Letzte gezeichnete Position je Kugel: aus der Strecke bis zum nächsten Bild ergibt sich die Drehung. */
+        const lastPos = new Map<number, Vec>();
         /** Kugeln, die gerade in eine Tasche fallen: Startpunkt, Tasche und Startzeit der Animation. */
         const sinking = new Map<number, { from: Vec; to: Vec; start: number }>();
         const wasPotted = new Map<number, boolean>();
@@ -68,9 +70,9 @@ export function TableView({ game }: { game: TableController }) {
           for (const b of balls) {
             let sprite = sprites.get(b.id);
             if (!sprite) {
-              sprite = drawBall(b.id);
+              sprite = createBall(b.id);
               sprites.set(b.id, sprite);
-              ballLayer.addChild(sprite);
+              ballLayer.addChild(sprite.view);
             }
             const placing = b.id === 0 && snap.phase === "placing";
             const pos = placing && snap.placingPos ? snap.placingPos : b.pos;
@@ -80,23 +82,31 @@ export function TableView({ game }: { game: TableController }) {
             }
             if (!b.potted) sinking.delete(b.id);
             wasPotted.set(b.id, b.potted);
+            // Rollen: nur während eines Stoßes und nicht bei Sprüngen (Neuaufbau, übersprungene Animation)
+            const last = lastPos.get(b.id);
+            if (last && !b.potted && snap.phase === "rolling" && !document.hidden) {
+              const dx = pos.x - last.x;
+              const dy = pos.y - last.y;
+              if ((dx !== 0 || dy !== 0) && Math.hypot(dx, dy) < MAX_ROLL_STEP) sprite.turn(roll(sprite.orientation, dx, dy, TABLE.ballRadius));
+            }
+            lastPos.set(b.id, { ...pos });
             const sink = sinking.get(b.id);
             const t = sink ? (performance.now() - sink.start) / SINK_MS : 1;
             if (sink && t < 1 && !placing) {
               const ease = t * (2 - t);
               const v = toView({ x: sink.from.x + (sink.to.x - sink.from.x) * ease, y: sink.from.y + (sink.to.y - sink.from.y) * ease });
-              sprite.position.set(v.x, v.y);
-              sprite.scale.set(1 - 0.45 * ease);
-              sprite.alpha = 1 - ease * ease;
-              sprite.visible = true;
+              sprite.view.position.set(v.x, v.y);
+              sprite.view.scale.set(1 - 0.45 * ease);
+              sprite.view.alpha = 1 - ease * ease;
+              sprite.view.visible = true;
               continue;
             }
             if (sink) sinking.delete(b.id);
             const v = toView(pos);
-            sprite.position.set(v.x, v.y);
-            sprite.scale.set(1);
-            sprite.visible = !b.potted || placing;
-            sprite.alpha = placing ? (snap.placingValid ? 0.85 : 0.35) : 1;
+            sprite.view.position.set(v.x, v.y);
+            sprite.view.scale.set(1);
+            sprite.view.visible = !b.potted || placing;
+            sprite.view.alpha = placing ? (snap.placingValid ? 0.85 : 0.35) : 1;
           }
           drawGuide(guide, snap.phase === "aiming" ? snap : null, balls);
           drawStick(stick, snap.phase === "aiming" ? snap : null, balls);
@@ -111,7 +121,9 @@ export function TableView({ game }: { game: TableController }) {
         };
         document.addEventListener("visibilitychange", onHidden);
         // Lesender Zugriff auf den sichtbaren Spielstand, für Fehlersuche und End-to-End-Tests
-        (window as unknown as { bandenduellState?: () => unknown }).bandenduellState = () => game.getSnapshot().state;
+        const hooks = window as unknown as { bandenduellState?: () => unknown; bandenduellRoll?: (id: number) => unknown };
+        hooks.bandenduellState = () => game.getSnapshot().state;
+        hooks.bandenduellRoll = (id) => sprites.get(id)?.orientation ?? null;
 
         const point = (ev: PointerEvent) => {
           const rect = app.canvas.getBoundingClientRect();
@@ -188,42 +200,61 @@ function drawTable() {
   return g;
 }
 
-function drawBall(id: number) {
+type BallSprite = { view: Container; orientation: Mat3; turn: (orientation: Mat3) => void };
+
+/** Kantenlänge des gemalten Kugelbilds in Pixeln. */
+const BALL_TEXTURE = 72;
+/** Größere Schritte zwischen zwei Bildern gelten als Sprung, nicht als Rollen (Tischmaß). */
+const MAX_ROLL_STEP = 400;
+
+/** Deckung der Ziffern im Nummernfeld, abgetastet aus einem vorab gemalten Bild. */
+function numberGlyph(id: number): (u: number, v: number) => number {
+  const size = 48;
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.font = `700 ${id >= 10 ? 30 : 36}px Inter, sans-serif`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText(String(id), size / 2, size / 2 + 2);
+  const alpha = ctx.getImageData(0, 0, size, size).data;
+  return (u, v) => {
+    const x = Math.floor(((u + 1) / 2) * size);
+    const y = Math.floor(((v + 1) / 2) * size);
+    if (x < 0 || y < 0 || x >= size || y >= size) return 0;
+    return alpha[(y * size + x) * 4 + 3]! / 255;
+  };
+}
+
+/** Kugel mit Schatten. `turn` setzt die Lage und malt die Kugel neu. */
+function createBall(id: number): BallSprite {
   const r = TABLE.ballRadius * S;
-  const c = new Container();
-  const g = new Graphics();
-  g.circle(1.5, 2.5, r).fill({ color: 0x000000, alpha: 0.35 });
-  if (id === 0) {
-    g.circle(0, 0, r).fill(IVORY);
-  } else if (id <= 8) {
-    g.circle(0, 0, r).fill(COLORS[id]!);
-  } else {
-    g.circle(0, 0, r).fill(IVORY);
-    const a = Math.asin(0.55);
-    const pts: number[] = [];
-    for (let i = 0; i <= 12; i++) {
-      const t = -a + (2 * a * i) / 12;
-      pts.push(r * Math.cos(t), r * Math.sin(t));
+  const view = new Container();
+  view.addChild(new Graphics().circle(1.5, 2.5, r).fill({ color: 0x000000, alpha: 0.35 }));
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = BALL_TEXTURE;
+  const ctx = canvas.getContext("2d")!;
+  const image = ctx.createImageData(BALL_TEXTURE, BALL_TEXTURE);
+  const look = ballLook(id, COLORS);
+  const glyph = look.numbered ? numberGlyph(id) : () => 0;
+  const texture = Texture.from(canvas);
+  const sprite = new Sprite(texture);
+  sprite.anchor.set(0.5);
+  // Das Bild hat rundum einen Pixel Rand für die geglättete Kante
+  sprite.width = sprite.height = (2 * r * BALL_TEXTURE) / (BALL_TEXTURE - 2);
+  view.addChild(sprite);
+  const ball: BallSprite = {
+    view,
+    orientation: initialOrientation(id),
+    turn(orientation) {
+      ball.orientation = orientation;
+      paintBall(image.data, BALL_TEXTURE, look, orientation, glyph);
+      ctx.putImageData(image, 0, 0);
+      texture.source.update();
     }
-    for (let i = 0; i <= 12; i++) {
-      const t = Math.PI - a + (2 * a * i) / 12;
-      pts.push(r * Math.cos(t), r * Math.sin(t));
-    }
-    // Waagerechtes Farbband: rechter und linker Kreisbogen, verbunden
-    g.poly(pts).fill(COLORS[id - 8]!);
-  }
-  if (id !== 0) {
-    g.circle(0, 0, r * 0.5).fill(IVORY);
-  }
-  g.circle(-r * 0.35, -r * 0.35, r * 0.28).fill({ color: 0xffffff, alpha: 0.3 });
-  c.addChild(g);
-  if (id !== 0) {
-    const t = new Text({ text: String(id), style: { fontFamily: "Inter, sans-serif", fontSize: 8, fontWeight: "700", fill: 0x15171a } });
-    t.anchor.set(0.5);
-    t.resolution = 3;
-    c.addChild(t);
-  }
-  return c;
+  };
+  ball.turn(ball.orientation);
+  return ball;
 }
 
 type AimSnap = { angle: number; power: number; dragging: boolean; guide: "normal" | "profi"; preview: { end: Vec; target: { pos: Vec; dir: Vec } | null; cueDir: Vec | null } | null };
