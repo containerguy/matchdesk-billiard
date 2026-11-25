@@ -24,6 +24,12 @@ const FULL_PULL_MM = 420;
 const TAP_SLOP_MM = 70;
 /** Touch: Näher an der Weißen dreht der Finger den Queue langsamer, für feines Zielen (Tischmaß). */
 const FINE_AIM_RADIUS_MM = 700;
+/**
+ * Touch: Beim Abheben rollt der Finger noch ein Stück. Bewegt er sich in diesem Zeitfenster vor dem
+ * Loslassen kaum, gilt der Stand vom Beginn des Fensters, nicht die letzte kleine Bewegung.
+ */
+const LIFT_WINDOW_MS = 120;
+const LIFT_SLOP_MM = 60;
 /** Touch: So nah an der gesetzten Weißen beginnt ein Finger, sie neu zu setzen (Tischmaß). */
 const GRAB_CUE_MM = 110;
 
@@ -62,6 +68,10 @@ export abstract class TableController {
   private dragStart: Vec | null = null;
   /** Touch-Zielen: Startpunkt, letzter Punkt und ob der Finger schon gewischt hat. */
   private touchAim: { start: Vec; last: Vec; moved: boolean } | null = null;
+  /** Touch: Verlauf der Geste (Zeit, Fingerposition, Zielwinkel), um das Abheben des Fingers herauszurechnen. */
+  private trail: Array<{ t: number; p: Vec; angle: number }> = [];
+  /** Zeitquelle in Millisekunden; in Tests ersetzbar. */
+  protected clock: () => number = () => performance.now();
   /** Touch: Die Weiße folgt gerade dem Finger und wird beim Loslassen gesetzt. */
   private touchPlacing = false;
   /** Gesetzte weiße Kugel bei "Kugel in der Hand", bevor gestoßen wird. */
@@ -137,6 +147,7 @@ export abstract class TableController {
     if (!s.canAct) return;
     if (s.phase === "placing") {
       if (touch && !this.touchPlacing) return;
+      if (touch) this.remember(p, s.angle);
       this.set({ placingPos: p, placingValid: isValidCuePlacement(s.state, p) });
       this.onAim();
       return;
@@ -158,7 +169,9 @@ export abstract class TableController {
       const turn = Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y);
       const reach = Math.sqrt(Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y));
       aim.last = p;
-      this.aimAngle(s.angle + turn * Math.min(1, reach / FINE_AIM_RADIUS_MM));
+      const angle = s.angle + turn * Math.min(1, reach / FINE_AIM_RADIUS_MM);
+      this.remember(p, angle);
+      this.aimAngle(angle);
       return;
     }
     if (this.dragStart && !touch) {
@@ -176,6 +189,8 @@ export abstract class TableController {
     if (s.phase === "placing" && touch) {
       // Touch: die Weiße folgt dem Finger und wird erst beim Loslassen gesetzt
       this.touchPlacing = true;
+      this.trail = [];
+      this.remember(p, s.angle);
       this.set({ placingPos: p, placingValid: isValidCuePlacement(s.state, p) });
       this.onAim();
       return;
@@ -198,11 +213,15 @@ export abstract class TableController {
         this.replacing = true;
         const pos = { ...this.placedCue };
         this.placedCue = null;
+        this.trail = [];
+        this.remember(pos, s.angle);
         this.set({ phase: "placing", placingPos: pos, placingValid: true, preview: null });
         return;
       }
       // Touch: Wischen dreht den Queue, Tippen zielt auf den Punkt; die Stärke kommt vom Regler
       this.touchAim = { start: p, last: p, moved: false };
+      this.trail = [];
+      this.remember(p, s.angle);
       return;
     }
     this.dragStart = p;
@@ -218,14 +237,25 @@ export abstract class TableController {
         this.touchPlacing = false;
         const keepAngle = this.replacing;
         this.replacing = false;
-        if (s.phase !== "placing" || !s.canAct || !s.placingPos || !s.placingValid) return;
-        this.placedCue = { ...s.placingPos };
+        if (s.phase !== "placing" || !s.canAct || !s.placingPos) return;
+        // Die Stelle vor dem Abheben des Fingers zählt, sofern die Weiße dort liegen darf
+        const settled = this.settled();
+        const pos = settled && isValidCuePlacement(s.state, settled.p) ? settled.p : s.placingPos;
+        if (pos === s.placingPos && !s.placingValid) return;
+        this.placedCue = { ...pos };
         this.set({ phase: "aiming", placingPos: null });
         if (keepAngle) this.aimAngle(s.angle);
         else this.aimAt(cueTowardsCenter(this.placedCue));
         return;
       }
-      if (aim && !aim.moved && s.phase === "aiming" && s.canAct) this.aimAt(aim.start);
+      if (!aim || s.phase !== "aiming" || !s.canAct) return;
+      if (!aim.moved) {
+        this.aimAt(aim.start);
+        return;
+      }
+      // Die letzte kleine Bewegung beim Abheben des Fingers verstellt das Ziel nicht
+      const settled = this.settled();
+      if (settled && settled.angle !== s.angle) this.aimAngle(settled.angle);
       return;
     }
     const wasDragging = this.dragStart !== null;
@@ -250,6 +280,26 @@ export abstract class TableController {
   private lastPointer: Vec | null = null;
   /** Die gesetzte Weiße wird gerade noch einmal verschoben: die Zielrichtung bleibt danach erhalten. */
   private replacing = false;
+
+  private remember(p: Vec, angle: number) {
+    this.trail.push({ t: this.clock(), p, angle });
+    if (this.trail.length > 64) this.trail.shift();
+  }
+
+  /**
+   * Stand der Geste vor dem Abheben: Hat sich der Finger im letzten Zeitfenster kaum bewegt, ist das
+   * der letzte Stand vor diesem Fenster. Bei einer zügigen Bewegung bis zum Schluss gilt der Endstand (`null`).
+   */
+  private settled(): { p: Vec; angle: number } | null {
+    const from = this.clock() - LIFT_WINDOW_MS;
+    const before = this.trail.filter((sample) => sample.t <= from);
+    const anchor = before[before.length - 1];
+    if (!anchor) return null;
+    const late = [anchor, ...this.trail.filter((sample) => sample.t > from)];
+    let travelled = 0;
+    for (let i = 1; i < late.length; i++) travelled += Math.hypot(late[i]!.p.x - late[i - 1]!.p.x, late[i]!.p.y - late[i - 1]!.p.y);
+    return travelled <= LIFT_SLOP_MM ? anchor : null;
+  }
 
   private aimAngle(angle: number) {
     this.set({ angle, preview: aimPreview(this.ballsWithPlacedCue(), angle) });

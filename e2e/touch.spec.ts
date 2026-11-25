@@ -44,10 +44,21 @@ test("Touchsteuerung am Smartphone: Weiße ziehen, wischend zielen, fein nachste
     angles.push(degrees((await aim(page)).angle));
   }
   await expect(loupe).toHaveAttribute("data-loupe", "on");
-  await finger("touchEnd");
-  expect(angles[5]).toBeGreaterThan(5);
-  expect(angles[5]).toBeLessThan(15);
-  for (let i = 1; i < angles.length; i++) expect(angles[i]! - angles[i - 1]!).toBeLessThan(4);
+  // Beim Abheben rollt der Finger noch ein Stück: das verstellt das Ziel nicht
+  await page.waitForTimeout(400);
+  const aimed = (await aim(page)).angle;
+  const roll = [await tablePoint(page, 1503, 812), await tablePoint(page, 1506, 824)];
+  await Promise.all([
+    cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [roll[0]!] }),
+    cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [roll[1]!] }),
+    cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+  ]);
+  await expect(hint(page)).toHaveText(HINT.aiming);
+  expect((await aim(page)).angle).toBe(aimed);
+  // Der Queue ist dem Finger gefolgt: um den überstrichenen Winkel, nicht bis zum Finger gesprungen
+  expect(degrees(aimed)).toBeGreaterThan(5);
+  expect(degrees(aimed)).toBeLessThan(15);
+  for (let i = 1; i < angles.length; i++) expect(angles[i]!).toBeGreaterThanOrEqual(angles[i - 1]!);
 
   // Tippen zielt direkt auf den Punkt
   const target = await tablePoint(page, 1680, 560);
