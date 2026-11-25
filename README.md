@@ -81,6 +81,9 @@ Der Server bietet unter `<BASE_PATH>/api/integrations/v1` eine kleine HTTP-Schni
 Plattform wie Matchdesk Partien zwischen ihren Benutzern anlegt. Das Spiel läuft dann eingebettet in der
 Plattform (`?embed=1`), jeder Spieler kommt über seinen persönlichen Platz-Link (`?seat=<token>`) an den Tisch.
 
+Eine Partie gegen den Computer braucht keine Schnittstelle: `?embed=1&solo=easy|medium|hard&name=<Anzeigename>`
+öffnet den Tisch eingebettet mit dem Computergegner der gewählten Stufe. Sie läuft ganz im Browser.
+
 | Umgebungsvariable | Bedeutung |
 | --- | --- |
 | `BASE_PATH` | Unterpfad hinter dem Reverse Proxy, z. B. `/game-servers/billiard` (leer = Wurzel) |
