@@ -23,8 +23,19 @@ const BALL_COLORS: Record<number, string> = {
 /** Einbett-Modus (z. B. in Matchdesk): `?embed=1`, meist mit Platz-Link `?seat=…`. */
 const params = new URL(location.href).searchParams;
 const EMBED = params.get("embed") === "1";
+/** Eingebettete Partie gegen den Computer: `?embed=1&solo=easy|medium|hard&name=…`, ohne Server. */
+const EMBED_SOLO = EMBED ? soloLevel(params.get("solo")) : null;
+
+function soloLevel(value: string | null): BotLevel | null {
+  return BOT_LEVELS.some((level) => level.id === value) ? (value as BotLevel) : null;
+}
 
 export function App() {
+  if (EMBED_SOLO) return <PracticeScreen playerName={params.get("name")?.trim().slice(0, 24) || "Spieler"} initialMode={EMBED_SOLO} embed />;
+  return <OnlineApp />;
+}
+
+function OnlineApp() {
   const net = useMemo(() => new NetClient(), []);
   const ns = useSyncExternalStore(net.subscribe, net.getState);
   const [practice, setPractice] = useState(false);
@@ -433,21 +444,38 @@ function GameLog({ game }: { game: TableController }) {
 
 type SoloMode = BotLevel | "free";
 
-function PracticeScreen({ playerName, onExit }: { playerName: string; onExit: () => void }) {
-  const [mode, setMode] = useState<SoloMode>("medium");
+function PracticeScreen({
+  playerName,
+  onExit,
+  initialMode = "medium",
+  embed = false
+}: {
+  playerName: string;
+  onExit?: () => void;
+  initialMode?: SoloMode;
+  embed?: boolean;
+}) {
+  const [mode, setMode] = useState<SoloMode>(initialMode);
   const game = useMemo(() => (mode === "free" ? new HotseatGame(["Spieler 1", "Spieler 2"]) : new SoloGame(playerName, mode)), [mode, playerName]);
   useEffect(() => () => (game instanceof SoloGame ? game.dispose() : undefined), [game]);
   const names = game.getSnapshot().names;
+  const newGame = (
+    <button type="button" className={embed ? "ghost wide" : "ghost"} onClick={() => game.newGame()}>
+      Neue Partie
+    </button>
+  );
   return (
-    <div className="app">
-      <TopBar>
-        <button type="button" className="ghost" onClick={() => game.newGame()}>
-          Neue Partie
-        </button>
-        <button type="button" className="ghost" onClick={onExit}>
-          Zurück
-        </button>
-      </TopBar>
+    <div className={embed ? "app embed" : "app"}>
+      {!embed && (
+        <TopBar>
+          {newGame}
+          {onExit && (
+            <button type="button" className="ghost" onClick={onExit}>
+              Zurück
+            </button>
+          )}
+        </TopBar>
+      )}
       <div className="body">
         <main className="play">
           <PlayArea
@@ -473,6 +501,7 @@ function PracticeScreen({ playerName, onExit }: { playerName: string; onExit: ()
             <p className="muted small">
               {mode === "free" ? "Freies Üben: du stößt für beide Seiten." : "Du hast den Anstoß. Ein Wechsel der Stufe beginnt eine neue Partie."}
             </p>
+            {embed && newGame}
           </section>
           <GameLog game={game} />
         </aside>
