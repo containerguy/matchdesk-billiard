@@ -395,6 +395,36 @@ button:focus-visible {
   background: linear-gradient(90deg, #7bc6a4, #f2a93b 70%, #e0603a);
 }
 
+.aim-fine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.aim-fine .hold {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.06);
+  color: inherit;
+  font-size: 18px;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+}
+
+.aim-fine .hold:disabled {
+  opacity: 0.4;
+}
+
+.aim-fine .hold:active:not(:disabled) {
+  background: rgba(242, 169, 59, 0.25);
+}
+
 .spin {
   display: flex;
   align-items: center;

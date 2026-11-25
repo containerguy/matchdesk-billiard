@@ -20,6 +20,12 @@ const STEPS_PER_MS = 0.48;
 const MAX_STEPS_PER_FRAME = 120;
 /** Zugweg in Millimetern für volle Stoßstärke beim Ziehen mit der Maus. */
 const FULL_PULL_MM = 420;
+/** Touch: Bewegt sich der Finger weniger weit, gilt die Berührung als Tippen (Tischmaß). */
+const TAP_SLOP_MM = 70;
+/** Touch: Näher an der Weißen dreht der Finger den Queue langsamer, für feines Zielen (Tischmaß). */
+const FINE_AIM_RADIUS_MM = 700;
+/** Touch: So nah an der gesetzten Weißen beginnt ein Finger, sie neu zu setzen (Tischmaß). */
+const GRAB_CUE_MM = 110;
 
 export type Phase = "placing" | "aiming" | "rolling" | "over";
 export type GuideMode = "normal" | "profi";
@@ -54,6 +60,10 @@ export abstract class TableController {
   private listeners = new Set<Listener>();
   private running: Running | null = null;
   private dragStart: Vec | null = null;
+  /** Touch-Zielen: Startpunkt, letzter Punkt und ob der Finger schon gewischt hat. */
+  private touchAim: { start: Vec; last: Vec; moved: boolean } | null = null;
+  /** Touch: Die Weiße folgt gerade dem Finger und wird beim Loslassen gesetzt. */
+  private touchPlacing = false;
   /** Gesetzte weiße Kugel bei "Kugel in der Hand", bevor gestoßen wird. */
   protected placedCue: Vec | null = null;
 
@@ -115,28 +125,61 @@ export abstract class TableController {
     this.fire();
   }
 
+  /** Dreht die Zielrichtung um einen kleinen Winkel (Feineinstellung per Knopf oder Taste). */
+  nudgeAim(degrees: number) {
+    const s = this.snapshot;
+    if (!s.canAct || s.phase !== "aiming") return;
+    this.aimAngle(s.angle + (degrees * Math.PI) / 180);
+  }
+
   pointerMove(p: Vec, touch: boolean) {
     const s = this.snapshot;
     if (!s.canAct) return;
     if (s.phase === "placing") {
+      if (touch && !this.touchPlacing) return;
       this.set({ placingPos: p, placingValid: isValidCuePlacement(s.state, p) });
       this.onAim();
       return;
     }
     if (s.phase !== "aiming") return;
+    if (touch) {
+      // Wischen dreht den Queue um die Weiße, ohne dass er zum Finger springt
+      const aim = this.touchAim;
+      if (!aim) return;
+      if (!aim.moved) {
+        if (Math.hypot(p.x - aim.start.x, p.y - aim.start.y) < TAP_SLOP_MM) return;
+        aim.moved = true;
+        aim.last = p;
+        return;
+      }
+      const cue = this.ballsWithPlacedCue().find((b) => b.id === 0)!.pos;
+      const a = { x: aim.last.x - cue.x, y: aim.last.y - cue.y };
+      const b = { x: p.x - cue.x, y: p.y - cue.y };
+      const turn = Math.atan2(a.x * b.y - a.y * b.x, a.x * b.x + a.y * b.y);
+      const reach = Math.sqrt(Math.hypot(a.x, a.y) * Math.hypot(b.x, b.y));
+      aim.last = p;
+      this.aimAngle(s.angle + turn * Math.min(1, reach / FINE_AIM_RADIUS_MM));
+      return;
+    }
     if (this.dragStart && !touch) {
       const power = Math.min(1, Math.hypot(p.x - this.dragStart.x, p.y - this.dragStart.y) / FULL_PULL_MM);
       this.set({ power });
       this.onAim();
       return;
     }
-    if (touch && !this.dragStart) return;
     this.aimAt(p);
   }
 
   pointerDown(p: Vec, touch: boolean) {
     const s = this.snapshot;
     if (!s.canAct) return;
+    if (s.phase === "placing" && touch) {
+      // Touch: die Weiße folgt dem Finger und wird erst beim Loslassen gesetzt
+      this.touchPlacing = true;
+      this.set({ placingPos: p, placingValid: isValidCuePlacement(s.state, p) });
+      this.onAim();
+      return;
+    }
     if (s.phase === "placing") {
       if (!isValidCuePlacement(s.state, p)) {
         this.set({ placingPos: p, placingValid: false });
@@ -148,17 +191,43 @@ export abstract class TableController {
       return;
     }
     if (s.phase !== "aiming") return;
-    this.dragStart = p;
     if (touch) {
-      // Touch: Finger auf dem Tisch dreht den Queue, Stärke kommt vom Regler
-      this.aimAt(p);
+      // Mit Kugel in der Hand lässt sich die gesetzte Weiße mit dem Finger noch einmal verschieben
+      if (this.placedCue && Math.hypot(p.x - this.placedCue.x, p.y - this.placedCue.y) < GRAB_CUE_MM) {
+        this.touchPlacing = true;
+        this.replacing = true;
+        const pos = { ...this.placedCue };
+        this.placedCue = null;
+        this.set({ phase: "placing", placingPos: pos, placingValid: true, preview: null });
+        return;
+      }
+      // Touch: Wischen dreht den Queue, Tippen zielt auf den Punkt; die Stärke kommt vom Regler
+      this.touchAim = { start: p, last: p, moved: false };
       return;
     }
+    this.dragStart = p;
     this.set({ dragging: true, power: 0 });
   }
 
   pointerUp(touch: boolean) {
     const s = this.snapshot;
+    if (touch) {
+      const aim = this.touchAim;
+      this.touchAim = null;
+      if (this.touchPlacing) {
+        this.touchPlacing = false;
+        const keepAngle = this.replacing;
+        this.replacing = false;
+        if (s.phase !== "placing" || !s.canAct || !s.placingPos || !s.placingValid) return;
+        this.placedCue = { ...s.placingPos };
+        this.set({ phase: "aiming", placingPos: null });
+        if (keepAngle) this.aimAngle(s.angle);
+        else this.aimAt(cueTowardsCenter(this.placedCue));
+        return;
+      }
+      if (aim && !aim.moved && s.phase === "aiming" && s.canAct) this.aimAt(aim.start);
+      return;
+    }
     const wasDragging = this.dragStart !== null;
     this.dragStart = null;
     if (touch || !wasDragging || s.phase !== "aiming" || !s.canAct) return;
@@ -172,10 +241,20 @@ export abstract class TableController {
   /** Bricht eine laufende Drag-Geste ab (z. B. wenn der Zeiger das Fenster verlässt). */
   cancelDrag() {
     this.dragStart = null;
+    this.touchAim = null;
+    this.touchPlacing = false;
+    this.replacing = false;
     if (this.snapshot.dragging) this.set({ dragging: false });
   }
 
   private lastPointer: Vec | null = null;
+  /** Die gesetzte Weiße wird gerade noch einmal verschoben: die Zielrichtung bleibt danach erhalten. */
+  private replacing = false;
+
+  private aimAngle(angle: number) {
+    this.set({ angle, preview: aimPreview(this.ballsWithPlacedCue(), angle) });
+    this.onAim();
+  }
 
   private aimAt(p: Vec) {
     this.lastPointer = p;

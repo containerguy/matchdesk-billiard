@@ -48,7 +48,7 @@ export async function enterLobby(page: Page, name: string, path = "/") {
 }
 
 /** Bildschirmkoordinaten eines Punktes auf dem Tisch (Millimeter). */
-async function tablePoint(page: Page, x: number, y: number) {
+export async function tablePoint(page: Page, x: number, y: number) {
   const canvas = page.locator(".table-view canvas");
   await canvas.evaluate((element) => element.scrollIntoView({ block: "center" }));
   const box = (await canvas.boundingBox())!;

@@ -69,9 +69,10 @@ Für den Betrieb im Internet einen Reverse-Proxy mit HTTPS davorsetzen, der WebS
 
 ## Bedienung
 
-- Weiße Kugel setzen: Klick oder Tipp (beim Anstoß links der Kopflinie).
+- Weiße Kugel setzen: Klick, am Handy mit dem Finger ziehen und loslassen (beim Anstoß links der Kopflinie). Am Handy lässt sie sich danach noch einmal greifen und verschieben.
 - Maus: bewegen zielt, Maustaste halten und zurückziehen bestimmt die Stärke, loslassen stößt.
-- Touch: Finger auf dem Tisch dreht den Queue, Stärke am Regler, dann „Stoß“.
+- Touch: Wischen über den Tisch dreht den Queue (nahe der Weißen feiner), Tippen zielt direkt auf den Punkt. Eine Lupe zeigt den Zielpunkt vergrößert. Stärke am Regler, dann „Stoß“.
+- „Fein zielen“ ◀ ▶ dreht in kleinen Schritten, gehalten immer schneller.
 - Effet: auf der kleinen weißen Kugel den Treffpunkt wählen.
 - Zielhilfe „Profi“ zeigt nur noch die Linie bis zur Geisterkugel.
 

@@ -1,5 +1,5 @@
 import { eightPocket, POCKETS, TABLE, type Ball, type BillardState, type Vec } from "@bandenduell/billard";
-import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
+import { Application, Container, Graphics, Matrix, RenderTexture, Sprite, Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
 import { ballLook, initialOrientation, paintBall, roll, type Mat3 } from "./ballRoll";
 import type { TableController } from "./controller";
@@ -53,13 +53,22 @@ export function TableView({ game }: { game: TableController }) {
           return;
         }
         el.appendChild(app.canvas);
-        app.stage.addChild(drawTable());
+        // Alles auf dem Tisch liegt in `world`, damit die Lupe denselben Inhalt vergrößert zeigen kann
+        const world = new Container();
         const guide = new Graphics();
         const pocketMark = new Graphics();
-        app.stage.addChild(pocketMark);
+        const placeMark = new Graphics();
         const ballLayer = new Container();
         const stick = new Graphics();
-        app.stage.addChild(guide, ballLayer, stick);
+        world.addChild(drawTable(), pocketMark, placeMark, guide, ballLayer, stick);
+        const loupe = createLoupe();
+        app.stage.addChild(world, loupe.view);
+        /** Touch: Finger liegt auf dem Tisch. */
+        let fingerDown = false;
+        /** Zuletzt wurde per Touch bedient: nur dann erscheint die Lupe. */
+        let touchUser = window.matchMedia?.("(pointer: coarse)").matches ?? false;
+        let loupeUntil = 0;
+        let lastAngle = Number.NaN;
         const sprites = new Map<number, BallSprite>();
         /** Letzte gezeichnete Position je Kugel: aus der Strecke bis zum nächsten Bild ergibt sich die Drehung. */
         const lastPos = new Map<number, Vec>();
@@ -121,6 +130,48 @@ export function TableView({ game }: { game: TableController }) {
           }
           drawGuide(guide, snap.phase === "aiming" ? snap : null, balls);
           drawStick(stick, snap.phase === "aiming" ? snap : null, balls);
+
+          // Beim Setzen der Weißen: Fadenkreuz über den Tisch, damit die Lage auch unter dem Finger erkennbar ist
+          placeMark.clear();
+          if (snap.phase === "placing" && snap.placingPos && fingerDown) {
+            const v = toView(snap.placingPos);
+            placeMark.moveTo(RAIL, v.y).lineTo(VIEW_W - RAIL, v.y).moveTo(v.x, RAIL).lineTo(v.x, VIEW_H - RAIL);
+            placeMark.stroke({ width: 1, color: snap.placingValid ? 0xffffff : 0xd9452b, alpha: 0.45 });
+          }
+
+          // Lupe: zeigt am Handy vergrößert, wohin gezielt oder gesetzt wird, solange der Finger arbeitet
+          // und kurz nach jeder Feineinstellung
+          const now = performance.now();
+          if (snap.phase === "aiming" && snap.angle !== lastAngle && !Number.isNaN(lastAngle) && touchUser) loupeUntil = now + LOUPE_LINGER_MS;
+          lastAngle = snap.phase === "aiming" ? snap.angle : Number.NaN;
+          const cueBall = balls.find((b) => b.id === 0);
+          const focus =
+            !snap.canAct || !touchUser
+              ? null
+              : snap.phase === "placing" && fingerDown
+                ? snap.placingPos
+                : snap.phase === "aiming" && (fingerDown || now < loupeUntil)
+                  ? (snap.preview?.end ?? cueBall?.pos ?? null)
+                  : null;
+          loupe.view.visible = focus !== null;
+          el.dataset.loupe = focus !== null ? "on" : "off";
+          if (focus) {
+            const v = toView(focus);
+            // In die Ecke, die Zielpunkt und Weiße am wenigsten verdeckt
+            const keep = [v, cueBall ? toView(snap.phase === "placing" ? focus : cueBall.pos) : v];
+            const corners = [RAIL + 8, VIEW_W - RAIL - 8 - LOUPE_SIZE].flatMap((x) => [RAIL + 8, VIEW_H - RAIL - 8 - LOUPE_SIZE].map((y) => ({ x, y })));
+            const free = (c: { x: number; y: number }) => Math.min(...keep.map((k) => Math.hypot(k.x - c.x - LOUPE_SIZE / 2, k.y - c.y - LOUPE_SIZE / 2)));
+            const corner = corners.reduce((best, c) => (free(c) > free(best) ? c : best));
+            loupe.view.position.set(corner.x, corner.y);
+            loupe.view.visible = false;
+            app.renderer.render({
+              container: world,
+              target: loupe.texture,
+              clear: true,
+              transform: new Matrix().scale(LOUPE_ZOOM, LOUPE_ZOOM).translate(LOUPE_SIZE / 2 - v.x * LOUPE_ZOOM, LOUPE_SIZE / 2 - v.y * LOUPE_ZOOM)
+            });
+            loupe.view.visible = true;
+          }
         };
 
         app.ticker.add((ticker) => {
@@ -132,11 +183,15 @@ export function TableView({ game }: { game: TableController }) {
         };
         document.addEventListener("visibilitychange", onHidden);
         // Lesender Zugriff auf den sichtbaren Spielstand, für Fehlersuche und End-to-End-Tests
-        const hooks = window as unknown as { bandenduellState?: () => unknown; bandenduellRoll?: (id: number) => unknown; bandenduellLoad?: (state: BillardState) => void };
+        const hooks = window as unknown as { bandenduellState?: () => unknown; bandenduellRoll?: (id: number) => unknown; bandenduellLoad?: (state: BillardState) => void; bandenduellAim?: () => unknown };
         // Stellungen aufbauen geht nur am lokalen Tisch, nie in einer Online-Partie
         hooks.bandenduellLoad = game instanceof HotseatGame ? (state) => game.loadPosition(state) : undefined;
         hooks.bandenduellState = () => game.getSnapshot().state;
         hooks.bandenduellRoll = (id) => sprites.get(id)?.orientation ?? null;
+        hooks.bandenduellAim = () => {
+          const { phase, angle, placingPos, placingValid } = game.getSnapshot();
+          return { phase, angle, placingPos, placingValid, cue: game.currentBalls().find((b) => b.id === 0)?.pos ?? null };
+        };
 
         const point = (ev: PointerEvent) => {
           const rect = app.canvas.getBoundingClientRect();
@@ -145,12 +200,21 @@ export function TableView({ game }: { game: TableController }) {
         const isTouch = (ev: PointerEvent) => ev.pointerType !== "mouse";
         const onMove = (ev: PointerEvent) => game.pointerMove(point(ev), isTouch(ev));
         const onDown = (ev: PointerEvent) => {
+          touchUser = isTouch(ev);
+          fingerDown = touchUser;
           ev.preventDefault();
           app.canvas.setPointerCapture(ev.pointerId);
           game.pointerDown(point(ev), isTouch(ev));
         };
-        const onUp = (ev: PointerEvent) => game.pointerUp(isTouch(ev));
-        const onCancel = () => game.cancelDrag();
+        const onUp = (ev: PointerEvent) => {
+          fingerDown = false;
+          if (isTouch(ev)) loupeUntil = performance.now() + LOUPE_LINGER_MS;
+          game.pointerUp(isTouch(ev));
+        };
+        const onCancel = () => {
+          fingerDown = false;
+          game.cancelDrag();
+        };
         app.canvas.addEventListener("pointermove", onMove);
         app.canvas.addEventListener("pointerdown", onDown);
         app.canvas.addEventListener("pointerup", onUp);
@@ -211,6 +275,29 @@ function drawTable() {
     g.circle(v.x, v.y, POCKET_DRAW_RADIUS).stroke({ width: 3, color: 0x1e1610 });
   }
   return g;
+}
+
+/** Kantenlänge der Lupe und ihre Vergrößerung (in Pixeln der Zeichenfläche). */
+const LOUPE_SIZE = 210;
+const LOUPE_ZOOM = 2.4;
+/** So lange bleibt die Lupe nach der letzten Berührung oder Feineinstellung stehen. */
+const LOUPE_LINGER_MS = 1600;
+
+/** Runde Lupe: ein Bild, in das der Tisch vergrößert gezeichnet wird, mit Rand und Mittelmarke. */
+function createLoupe() {
+  const texture = RenderTexture.create({ width: LOUPE_SIZE, height: LOUPE_SIZE, resolution: Math.min(2, window.devicePixelRatio || 1), antialias: true });
+  const view = new Container();
+  const half = LOUPE_SIZE / 2;
+  const picture = new Sprite(texture);
+  const mask = new Graphics().circle(half, half, half - 2).fill(0xffffff);
+  picture.mask = mask;
+  const frame = new Graphics();
+  frame.circle(half, half, half - 2).stroke({ width: 4, color: 0x0a1416 });
+  frame.circle(half, half, half - 2).stroke({ width: 2, color: AMBER, alpha: 0.9 });
+  view.addChild(new Graphics().circle(half + 2, half + 4, half - 2).fill({ color: 0x000000, alpha: 0.4 }), picture, mask, frame);
+  view.visible = false;
+  view.eventMode = "none";
+  return { view, texture };
 }
 
 type BallSprite = { view: Container; orientation: Mat3; turn: (orientation: Mat3) => void };
