@@ -646,6 +646,51 @@ function MiniBall({ id, faded }: { id: number; faded: boolean }) {
   );
 }
 
+/** Knopf, der beim Halten wiederholt auslöst, mit der Zeit in größeren Schritten. */
+function HoldButton({ label, disabled, onStep, children }: { label: string; disabled: boolean; onStep: (scale: number) => void; children: React.ReactNode }) {
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const step = useRef(onStep);
+  step.current = onStep;
+  const stop = () => {
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = null;
+  };
+  useEffect(() => stop, []);
+  const start = (ev: React.PointerEvent) => {
+    ev.preventDefault();
+    stop();
+    step.current(1);
+    let count = 0;
+    const repeat = () => {
+      count++;
+      step.current(count > 12 ? 4 : count > 5 ? 2 : 1);
+      timer.current = setTimeout(repeat, 70);
+    };
+    timer.current = setTimeout(repeat, 350);
+  };
+  return (
+    <button
+      type="button"
+      className="hold"
+      aria-label={label}
+      disabled={disabled}
+      onPointerDown={start}
+      onPointerUp={stop}
+      onPointerLeave={stop}
+      onPointerCancel={stop}
+      onContextMenu={(ev) => ev.preventDefault()}
+      onKeyDown={(ev) => {
+        if (ev.key === "Enter" || ev.key === " ") {
+          ev.preventDefault();
+          step.current(1);
+        }
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
 function Controls({ game, snap, online }: { game: TableController; snap: Snapshot; online: boolean }) {
   const pad = useRef<HTMLButtonElement>(null);
   const pickSpin = (ev: React.MouseEvent<HTMLButtonElement>) => {
@@ -667,11 +712,11 @@ function Controls({ game, snap, online }: { game: TableController; snap: Snapsho
           : ""
     : snap.phase === "placing"
       ? snap.state.isBreak
-        ? "Weiße Kugel links der Kopflinie setzen (antippen oder klicken). Kräftig anstoßen: fällt keine Kugel, müssen vier Kugeln eine Bande erreichen."
+        ? "Weiße Kugel links der Kopflinie setzen (klicken, am Handy mit dem Finger ziehen und loslassen). Kräftig anstoßen: fällt keine Kugel, müssen vier Kugeln eine Bande erreichen."
         : snap.state.fromKitchen
           ? "Kugel in der Hand im Kopffeld: Weiße links der Kopflinie setzen. Kugeln im Kopffeld nicht direkt anspielen."
-        : "Kugel in der Hand: weiße Kugel frei setzen"
-      : "Zielen: Maus bewegen oder Finger auf den Tisch. Stoßen: Maus halten und zurückziehen, oder Regler und Stoß-Knopf.";
+        : "Kugel in der Hand: weiße Kugel frei setzen (klicken, am Handy mit dem Finger ziehen und loslassen)"
+      : "Zielen: Maus bewegen, am Handy über den Tisch wischen oder tippen, fein mit ◀ ▶. Stoßen: Maus halten und zurückziehen, oder Regler und Stoß-Knopf.";
   const canShoot = myTurn && snap.phase === "aiming";
   const eightTarget = myTurn && snap.phase !== "over" ? eightPocket(snap.state, snap.state.turn) : null;
   return (
@@ -695,6 +740,15 @@ function Controls({ game, snap, online }: { game: TableController; snap: Snapsho
       <button type="button" className="primary shoot" disabled={!canShoot || snap.power < 0.02} onClick={() => game.shootNow()}>
         Stoß
       </button>
+      <div className="aim-fine" role="group" aria-label="Fein zielen">
+        <HoldButton label="Fein nach links zielen" disabled={!canShoot} onStep={(scale) => game.nudgeAim(-0.15 * scale)}>
+          ◀
+        </HoldButton>
+        <span>Fein zielen</span>
+        <HoldButton label="Fein nach rechts zielen" disabled={!canShoot} onStep={(scale) => game.nudgeAim(0.15 * scale)}>
+          ▶
+        </HoldButton>
+      </div>
       <div className="spin">
         <button ref={pad} type="button" className="spin-pad" onClick={pickSpin} disabled={!myTurn} aria-label={`Effet wählen, aktuell ${spinText}`}>
           <span className="spin-dot" style={{ left: `${50 + snap.spin.x * 40}%`, top: `${50 + snap.spin.y * 40}%` }} />
