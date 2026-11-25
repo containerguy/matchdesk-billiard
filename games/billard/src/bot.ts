@@ -1,7 +1,7 @@
 import { otherSeat, type Seat } from "@bandenduell/core";
 import { cloneBalls, simulateShot, type Ball } from "./physics";
 import { random } from "./rack";
-import { groupCleared, groupOf, isValidCuePlacement, judgeShot, type BillardMove, type BillardState } from "./rules";
+import { eightPocket, groupCleared, groupOf, isValidCuePlacement, judgeShot, type BillardMove, type BillardState } from "./rules";
 import { FOOT_SPOT, POCKETS, TABLE, vec, type Vec } from "./table";
 
 /** Spielstärke des Computergegners. */
@@ -121,8 +121,12 @@ function potCandidates(state: BillardState, seat: Seat, cfg: LevelConfig): Candi
   const r = TABLE.ballRadius;
   const out: Candidate[] = [];
 
+  // Kneipenregel: die 8 zählt nur in der vorgegebenen Tasche
+  const required = eightPocket(state, seat);
+
   for (const target of targets) {
-    for (const pocket of POCKETS) {
+    for (const [index, pocket] of POCKETS.entries()) {
+      if (target.id === 8 && required !== null && index !== required) continue;
       const aim = pocketAim(pocket);
       const toPocket = vec.sub(aim, target.pos);
       const pocketDist = vec.len(toPocket);

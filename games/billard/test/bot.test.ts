@@ -19,13 +19,37 @@ function straightIn(): BillardState {
   const ball = (id: number, x: number, y: number, potted = false): Ball => ({ id, pos: { x, y }, vel: { x: 0, y: 0 }, potted });
   const balls = [ball(0, 1400, 700), ball(1, 1900, 950), ball(8, 400, 200), ball(9, 300, 900)];
   for (let id = 2; id <= 15; id++) if (id !== 8 && id !== 9) balls.push(ball(id, 0, 0, true));
-  return { balls, turn: 0, groups: ["solids", "stripes"], ballInHand: false, isBreak: false, fromKitchen: false, winner: null, winReason: null, shots: 5 };
+  return { balls, turn: 0, groups: ["solids", "stripes"], ballInHand: false, isBreak: false, fromKitchen: false, lastPocket: { solids: null, stripes: null }, winner: null, winReason: null, shots: 5 };
 }
 
 describe("Computergegner", () => {
   it("wählt bei gleichem Zustand und Seed denselben Stoß", () => {
     const state = straightIn();
     expect(chooseBotMove(state, 0, "medium", 7)).toEqual(chooseBotMove(state, 0, "medium", 7));
+  });
+
+  describe("Kneipenregel", () => {
+    const onEight = (eight: { x: number; y: number }, cue: { x: number; y: number }, lastSolid: number): BillardState => {
+      const base = straightIn();
+      const balls = base.balls.map((b) => (b.id === 1 ? { ...b, potted: true } : b.id === 8 ? { ...b, pos: eight } : b.id === 0 ? { ...b, pos: cue } : b));
+      return { ...base, balls, lastPocket: { solids: lastSolid, stripes: null } };
+    };
+
+    it("versenkt die 8 in der vorgegebenen Tasche", () => {
+      // Vorgabe oben Mitte (letzte Kugel fiel unten Mitte), die 8 liegt gerade davor
+      const state = onEight({ x: 1120, y: 300 }, { x: 1120, y: 800 }, 4);
+      for (let seed = 0; seed < 5; seed++) {
+        expect(applyMove(state, 0, chooseBotMove(state, 0, "hard", seed)).state).toMatchObject({ winner: 0, winReason: "8 regulär versenkt" });
+      }
+    });
+
+    it("spielt die 8 nicht in eine andere Tasche, auch wenn sie dort gerade liegt", () => {
+      // Die 8 liegt gerade vor der Tasche unten rechts, vorgegeben ist die Tasche oben rechts
+      const state = onEight({ x: 1900, y: 950 }, { x: 1400, y: 700 }, 3);
+      for (let seed = 0; seed < 5; seed++) {
+        expect(applyMove(state, 0, chooseBotMove(state, 0, "hard", seed)).state.winner).not.toBe(1);
+      }
+    });
   });
 
   it("stößt auf jeder Stufe gültig an", () => {

@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   aimPreview,
   billard,
+  eightPocket,
   judgeShot,
+  oppositePocket,
+  POCKETS,
   rack8Ball,
   simulateShot,
   TABLE,
@@ -16,7 +19,7 @@ const ball = (id: number, x: number, y: number, potted = false): Ball => ({ id, 
 const noSpin = { x: 0, y: 0 };
 
 function stateWith(balls: Ball[], partial: Partial<BillardState> = {}): BillardState {
-  return { balls, turn: 0, groups: [null, null], ballInHand: false, isBreak: false, fromKitchen: false, winner: null, winReason: null, shots: 1, ...partial };
+  return { balls, turn: 0, groups: [null, null], ballInHand: false, isBreak: false, fromKitchen: false, lastPocket: { solids: null, stripes: null }, winner: null, winReason: null, shots: 1, ...partial };
 }
 
 describe("Dreieck", () => {
@@ -130,6 +133,50 @@ describe("8-Ball-Regeln", () => {
     const after = before.balls.map((b) => (b.id === 8 ? { ...b, potted: true } : b));
     const { state } = judgeShot(before, 0, after, [contact(8), pocket(8)]);
     expect(state.winner).toBe(0);
+  });
+
+  describe("Kneipenregel für die 8", () => {
+    const solidsGone = [1, 2, 3, 4, 5, 6, 7].map((id) => ball(id, 0, 0, true));
+    const onEight = (lastSolid: number | null) =>
+      stateWith([ball(0, 300, 300), ...solidsGone, ball(8, 600, 600), ball(9, 900, 900)], {
+        groups: ["solids", "stripes"],
+        lastPocket: { solids: lastSolid, stripes: null }
+      });
+    const potEight = (before: BillardState, into: number, extra: PhysicsEvent[] = []) =>
+      judgeShot(before, 0, before.balls.map((b) => (b.id === 8 ? { ...b, potted: true } : b)), [contact(8), { kind: "pocket", ball: 8, pocket: into }, ...extra]);
+
+    it("merkt sich je Gruppe die Tasche der zuletzt versenkten Kugel", () => {
+      const before = stateWith([ball(0, 300, 300), ball(2, 600, 600), ball(3, 700, 600), ball(8, 1200, 600)], { groups: ["solids", "stripes"] });
+      const { state } = judgeShot(before, 0, before.balls, [contact(2), { kind: "pocket", ball: 2, pocket: 4 }, { kind: "pocket", ball: 3, pocket: 2 }]);
+      expect(state.lastPocket).toEqual({ solids: 2, stripes: null });
+    });
+
+    it("gibt die gegenüberliegende Tasche vor: Ecke zu diagonaler Ecke, Mitte zu Mitte", () => {
+      expect([0, 1, 2, 3, 4, 5].map(oppositePocket)).toEqual([5, 4, 3, 2, 1, 0]);
+      for (const index of [0, 1, 2]) {
+        const a = POCKETS[index]!;
+        const b = POCKETS[oppositePocket(index)]!;
+        expect(a.x + b.x).toBeCloseTo(TABLE.width);
+        expect(a.y + b.y).toBeCloseTo(TABLE.height);
+      }
+      expect(eightPocket(onEight(2), 0)).toBe(3);
+      expect(eightPocket(onEight(2), 1)).toBeNull();
+    });
+
+    it("8 in der vorgegebenen Tasche gewinnt", () => {
+      const { state } = potEight(onEight(0), 5);
+      expect(state).toMatchObject({ winner: 0, winReason: "8 regulär versenkt" });
+    });
+
+    it("8 in einer anderen Tasche verliert", () => {
+      const { state } = potEight(onEight(0), 4);
+      expect(state).toMatchObject({ winner: 1, winReason: "8 in die falsche Tasche versenkt" });
+    });
+
+    it("8 in der richtigen Tasche verliert, wenn die Weiße mitfällt", () => {
+      const { state } = potEight(onEight(0), 5, [{ kind: "pocket", ball: 0, pocket: 1 }]);
+      expect(state).toMatchObject({ winner: 1, winReason: "8 mit Foul versenkt" });
+    });
   });
 
   it("8 zu früh versenkt verliert", () => {

@@ -9,7 +9,7 @@ Plan und Architektur: [Online-Billard: Recherche und Umsetzungsplan](https://cla
 ## Stand
 
 - **Physik:** deterministische 2D-Kugelphysik (fester Zeitschritt 1/480 s), Banden, Taschen, Vor- und Rücklauf, seitliches Effet an der Bande.
-- **8-Ball-Regeln:** Anstoß aus dem Kopffeld (gültig, wenn eine Kugel fällt oder vier Kugeln eine Bande erreichen, sonst Neuaufbau und der Gegner stößt an), offener Tisch, Volle gegen Halbe, Fouls mit Kugel in der Hand, nach versenkter Weißer beim Anstoß nur im Kopffeld, Sieg und Niederlage über die 8.
+- **8-Ball-Regeln:** Anstoß aus dem Kopffeld (gültig, wenn eine Kugel fällt oder vier Kugeln eine Bande erreichen, sonst Neuaufbau und der Gegner stößt an), offener Tisch, Volle gegen Halbe, Fouls mit Kugel in der Hand, nach versenkter Weißer beim Anstoß nur im Kopffeld, Sieg und Niederlage über die 8. Kneipenregel: Die 8 muss in die Tasche gegenüber der Tasche, in die die letzte eigene Kugel gefallen ist (Ecke zu diagonaler Ecke, Mitte zu Mitte); jede andere Tasche verliert.
 - **Online:** Spielserver mit Lobby, öffentlichen und privaten Tischen (Code und Einladungslink), Chat, Revanche, Wiederverbinden nach Verbindungsabbruch (60 s Frist). Der Server rechnet jeden Stoß selbst, beide Seiten sehen denselben Ablauf und das Zielen des Gegners.
 - **Smartphone:** Touch-Steuerung (Finger zielt, Regler für die Stärke, Knopf „Stoß“) und Layout für Hoch- und Querformat.
 - **Solo:** Partie gegen den Computer in drei Stufen (Leicht, Mittel, Schwer) oder freies Üben ohne Gegner. Der Computergegner läuft im Browser und braucht keinen Server.
