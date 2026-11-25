@@ -2,6 +2,8 @@ import { expect, test } from "@playwright/test";
 import { gameLog, hint, HINT, newPlayer, seeded, shoot, visibleState, waitForTurn } from "./helpers";
 
 test("Solo-Partie gegen den Computer bis zum Ende", async ({ browser }) => {
+  // Eine ganze Partie gegen die schwere Stufe braucht auf langsamen Rechnern mehrere Minuten
+  test.setTimeout(360_000);
   const { page, errors } = await newPlayer(browser, { fast: true });
   await page.goto("/");
   await page.getByRole("button", { name: "Allein gegen den Computer spielen" }).click();

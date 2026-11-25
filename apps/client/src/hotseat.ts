@@ -15,6 +15,12 @@ export class HotseatGame extends TableController {
     this.adopt(state);
   }
 
+  /** Baut am lokalen Tisch eine vorgegebene Stellung auf (Fehlersuche und End-to-End-Tests). */
+  loadPosition(state: BillardState) {
+    this.set({ log: ["Stellung aufgebaut."] });
+    this.adopt(state);
+  }
+
   protected mayAct(_state: BillardState) {
     return true;
   }
