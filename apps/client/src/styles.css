@@ -225,6 +225,127 @@ button:focus-visible {
   -webkit-user-select: none;
 }
 
+.table-stage {
+  position: relative;
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.celebration {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 28px;
+}
+
+.celebration-banner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 16px 32px;
+  border-radius: 16px;
+  background: rgba(10, 20, 22, 0.82);
+  border: 1px solid rgba(242, 169, 59, 0.6);
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
+  animation: banner-in 0.6s cubic-bezier(0.2, 1.4, 0.4, 1) both, banner-out 0.6s ease 5s forwards;
+}
+
+.celebration-banner strong {
+  font-size: clamp(22px, 5vw, 36px);
+  color: #f2a93b;
+}
+
+.celebration.lost .celebration-banner {
+  border-color: rgba(255, 255, 255, 0.2);
+}
+
+.celebration.lost .celebration-banner strong {
+  color: #f4f1ea;
+  font-size: clamp(18px, 4vw, 26px);
+}
+
+.celebration .trophy {
+  font-size: clamp(30px, 7vw, 52px);
+  line-height: 1;
+  animation: trophy-bounce 0.9s ease 0.3s 3 both;
+}
+
+.confetti i {
+  position: absolute;
+  top: -24px;
+  border-radius: 2px;
+  opacity: 0;
+  animation-name: confetti-fall;
+  animation-timing-function: cubic-bezier(0.3, 0.2, 0.6, 1);
+  animation-iteration-count: 2;
+}
+
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0);
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--drift), 560px) rotate(var(--turns));
+  }
+}
+
+@keyframes banner-in {
+  from {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes banner-out {
+  to {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+}
+
+@keyframes trophy-bounce {
+  0%,
+  100% {
+    transform: translateY(0) rotate(0);
+  }
+  40% {
+    transform: translateY(-10px) rotate(-8deg);
+  }
+  70% {
+    transform: translateY(0) rotate(6deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .confetti {
+    display: none;
+  }
+
+  .celebration-banner,
+  .celebration .trophy {
+    animation: banner-out 0.6s ease 5s forwards;
+  }
+
+  .celebration .trophy {
+    animation: none;
+  }
+}
+
 .table-view canvas {
   display: block;
 }
