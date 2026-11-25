@@ -1,8 +1,9 @@
-import { eightPocket, POCKETS, TABLE, type Ball, type Vec } from "@bandenduell/billard";
+import { eightPocket, POCKETS, TABLE, type Ball, type BillardState, type Vec } from "@bandenduell/billard";
 import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
 import { ballLook, initialOrientation, paintBall, roll, type Mat3 } from "./ballRoll";
 import type { TableController } from "./controller";
+import { HotseatGame } from "./hotseat";
 
 /** Darstellung: Tuch 880 × 440 px, Bande 40 px, Gesamtfläche 960 × 520 px. */
 const RAIL = 40;
@@ -131,7 +132,9 @@ export function TableView({ game }: { game: TableController }) {
         };
         document.addEventListener("visibilitychange", onHidden);
         // Lesender Zugriff auf den sichtbaren Spielstand, für Fehlersuche und End-to-End-Tests
-        const hooks = window as unknown as { bandenduellState?: () => unknown; bandenduellRoll?: (id: number) => unknown };
+        const hooks = window as unknown as { bandenduellState?: () => unknown; bandenduellRoll?: (id: number) => unknown; bandenduellLoad?: (state: BillardState) => void };
+        // Stellungen aufbauen geht nur am lokalen Tisch, nie in einer Online-Partie
+        hooks.bandenduellLoad = game instanceof HotseatGame ? (state) => game.loadPosition(state) : undefined;
         hooks.bandenduellState = () => game.getSnapshot().state;
         hooks.bandenduellRoll = (id) => sprites.get(id)?.orientation ?? null;
 
