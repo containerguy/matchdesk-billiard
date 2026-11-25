@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { enterLobby, gameLog, hint, HINT, newPlayer, shoot, shootAtEight, waitForTurn } from "./helpers";
+import { ballRoll, enterLobby, gameLog, hint, HINT, newPlayer, shoot, shootAtEight, waitForTurn } from "./helpers";
 
 test("Online-Partie zwischen Desktop und Smartphone: Einladung, Stöße in Echtzeit, Chat, Aufgabe", async ({ browser }) => {
   const rene = await newPlayer(browser);
@@ -17,8 +17,12 @@ test("Online-Partie zwischen Desktop und Smartphone: Einladung, Stöße in Echtz
 
   // René stößt an; beide sehen die Kugeln rollen und danach denselben Spielverlauf
   await waitForTurn(rene.page);
+  const cueBefore = await ballRoll(mia.page, 0);
   await shoot(rene.page, { place: { x: 400, y: 560 }, aimAt: { x: 1680, y: 560 }, power: 0.9, wait: false });
   await expect(hint(mia.page)).toContainText(HINT.rolling);
+  // Die Kugeln rollen sichtbar: die Weiße dreht sich bei beiden mit
+  await expect.poll(() => ballRoll(mia.page, 0)).not.toEqual(cueBefore);
+  await expect.poll(() => ballRoll(rene.page, 0)).not.toEqual(cueBefore);
   await expect(hint(rene.page)).not.toContainText(HINT.rolling, { timeout: 40_000 });
   await expect(hint(mia.page)).not.toContainText(HINT.rolling, { timeout: 40_000 });
   expect(await gameLog(mia.page).allInnerTexts()).toEqual(await gameLog(rene.page).allInnerTexts());
