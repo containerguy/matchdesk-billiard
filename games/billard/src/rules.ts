@@ -2,12 +2,15 @@ import { otherSeat, type GameDefinition, type GameResult, type MoveCheck, type S
 import { cloneBalls, simulateShot, type Ball, type PhysicsEvent, type Shot } from "./physics";
 import { parseMove } from "./move";
 import { rack8Ball } from "./rack";
-import { FOOT_SPOT, HEAD_SPOT, TABLE, vec, type Vec } from "./table";
+import { FOOT_SPOT, HEAD_SPOT, POCKETS, TABLE, vec, type Vec } from "./table";
 
 /**
  * 8-Ball nach vereinfachten Pool-Regeln:
  * offener Tisch bis zur ersten versenkten Kugel nach dem Anstoß, Volle (1–7) gegen Halbe (9–15),
  * die 8 zuletzt. Ein Foul gibt dem Gegner "Kugel in der Hand".
+ *
+ * Kneipenregel für die 8: Sie muss in die Tasche gegenüber der Tasche fallen, in die die letzte
+ * eigene Kugel gefallen ist (gespiegelt an der Tischmitte: Ecke zu diagonaler Ecke, Mitte zu Mitte).
  */
 
 export type Group = "solids" | "stripes";
@@ -25,6 +28,8 @@ export type BillardState = {
    * hinter der Kopflinie und darf keine Kugel direkt anspielen, die selbst im Kopffeld liegt.
    */
   fromKitchen: boolean;
+  /** Tasche (Index in POCKETS), in die zuletzt eine Kugel der Gruppe gefallen ist. */
+  lastPocket: Record<Group, number | null>;
   winner: Seat | null;
   winReason: string | null;
   shots: number;
@@ -62,6 +67,20 @@ export function groupCleared(balls: readonly Ball[], group: Group) {
   return balls.every((b) => groupOf(b.id) !== group || b.potted);
 }
 
+/** Die gegenüberliegende Tasche, gespiegelt an der Tischmitte. */
+export const oppositePocket = (pocket: number) => POCKETS.length - 1 - pocket;
+
+/**
+ * Tasche, in die `seat` die 8 spielen muss. `null`, solange noch eigene Kugeln liegen
+ * oder keine Vorgabe besteht.
+ */
+export function eightPocket(state: Pick<BillardState, "balls" | "groups" | "lastPocket">, seat: Seat): number | null {
+  const group = state.groups[seat];
+  if (group === null || !groupCleared(state.balls, group)) return null;
+  const last = state.lastPocket?.[group] ?? null;
+  return last === null ? null : oppositePocket(last);
+}
+
 export function createInitialState(options: { seed: number; startingSeat: Seat }): BillardState {
   return {
     balls: rack8Ball(options.seed),
@@ -70,6 +89,7 @@ export function createInitialState(options: { seed: number; startingSeat: Seat }
     ballInHand: true,
     isBreak: true,
     fromKitchen: false,
+    lastPocket: { solids: null, stripes: null },
     winner: null,
     winReason: null,
     shots: 0
@@ -128,6 +148,12 @@ export function judgeShot(
   const groups: [Group | null, Group | null] = [before.groups[0], before.groups[1]];
   const ownGroup = groups[seat];
   const onEight = ownGroup !== null && groupCleared(before.balls, ownGroup);
+  const target = eightPocket(before, seat);
+  const lastPocket: Record<Group, number | null> = { solids: before.lastPocket?.solids ?? null, stripes: before.lastPocket?.stripes ?? null };
+  for (const e of physics) {
+    const group = e.kind === "pocket" ? groupOf(e.ball) : null;
+    if (e.kind === "pocket" && group) lastPocket[group] = e.pocket;
+  }
 
   const firstContactIndex = physics.findIndex((e) => e.kind === "ballContact" && (e.a === 0 || e.b === 0));
   const firstContactEvent = physics[firstContactIndex];
@@ -171,6 +197,9 @@ export function judgeShot(
     if (before.isBreak) {
       respotEight(balls);
       events.push({ kind: "eightRespotted" });
+    } else if (onEight && foul === null && target !== null && eightFellInto(physics) !== target) {
+      winner = opponent;
+      winReason = "8 in die falsche Tasche versenkt";
     } else if (onEight && foul === null) {
       winner = seat;
       winReason = "8 regulär versenkt";
@@ -215,12 +244,18 @@ export function judgeShot(
       ballInHand: foul !== null && winner === null,
       isBreak: false,
       fromKitchen: before.isBreak && foul === "weiße versenkt" && winner === null,
+      lastPocket,
       winner,
       winReason,
       shots: before.shots + 1
     },
     events
   };
+}
+
+function eightFellInto(physics: readonly PhysicsEvent[]) {
+  const event = physics.find((e) => e.kind === "pocket" && e.ball === 8);
+  return event && event.kind === "pocket" ? event.pocket : null;
 }
 
 function isLegalFirstContact(id: number, ownGroup: Group | null, onEight: boolean) {

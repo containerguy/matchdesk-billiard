@@ -1,4 +1,4 @@
-import { groupCleared, groupOf, type BotLevel, type Group } from "@bandenduell/billard";
+import { eightPocket, groupCleared, groupOf, type BotLevel, type Group } from "@bandenduell/billard";
 import type { Seat } from "@bandenduell/core";
 import type { TableView as TableInfo } from "@bandenduell/protocol";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type FormEvent, type ReactNode } from "react";
@@ -555,6 +555,7 @@ function PlayerCard({ snap, seat, info, me }: { snap: Snapshot; seat: Seat; info
           : "wartet";
   const ids = group === "solids" ? [1, 2, 3, 4, 5, 6, 7] : group === "stripes" ? [9, 10, 11, 12, 13, 14, 15] : [];
   const onEight = group !== null && groupCleared(state.balls, group);
+  const target = eightPocket(state, seat);
   const name = info?.name ?? "frei";
   return (
     <div className={`player ${seat === 1 ? "right" : ""} ${active || won ? "active" : ""}`}>
@@ -576,11 +577,15 @@ function PlayerCard({ snap, seat, info, me }: { snap: Snapshot; seat: Seat; info
             return <MiniBall key={id} id={id} faded={potted} />;
           })}
           {onEight && <MiniBall id={8} faded={false} />}
+          {target !== null && state.winner === null && <span className="eight-target">in die Tasche {POCKET_NAMES[target]}</span>}
         </div>
       </div>
     </div>
   );
 }
+
+/** Namen der Taschen in der Reihenfolge von POCKETS. */
+const POCKET_NAMES = ["oben links", "oben Mitte", "oben rechts", "unten links", "unten Mitte", "unten rechts"];
 
 function groupLabel(g: Group | null) {
   return g === "solids" ? "Volle" : g === "stripes" ? "Halbe" : "Gruppe offen";
@@ -624,6 +629,7 @@ function Controls({ game, snap, online }: { game: TableController; snap: Snapsho
         : "Kugel in der Hand: weiße Kugel frei setzen"
       : "Zielen: Maus bewegen oder Finger auf den Tisch. Stoßen: Maus halten und zurückziehen, oder Regler und Stoß-Knopf.";
   const canShoot = myTurn && snap.phase === "aiming";
+  const eightTarget = myTurn && snap.phase !== "over" ? eightPocket(snap.state, snap.state.turn) : null;
   return (
     <div className="controls" data-shots={snap.state.shots} data-phase={snap.phase}>
       <div className="power">
@@ -664,6 +670,11 @@ function Controls({ game, snap, online }: { game: TableController; snap: Snapsho
           </button>
         </div>
       </div>
+      {eightTarget !== null && (
+        <p className="rule-note">
+          Die 8 muss in die markierte Tasche {POCKET_NAMES[eightTarget]} (gegenüber deiner letzten Kugel). Jede andere Tasche verliert.
+        </p>
+      )}
       {hint && <p className="hint">{hint}</p>}
     </div>
   );

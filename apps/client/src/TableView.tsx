@@ -1,4 +1,4 @@
-import { POCKETS, TABLE, type Ball, type Vec } from "@bandenduell/billard";
+import { eightPocket, POCKETS, TABLE, type Ball, type Vec } from "@bandenduell/billard";
 import { Application, Container, Graphics, Sprite, Texture } from "pixi.js";
 import { useEffect, useRef } from "react";
 import { ballLook, initialOrientation, paintBall, roll, type Mat3 } from "./ballRoll";
@@ -54,6 +54,8 @@ export function TableView({ game }: { game: TableController }) {
         el.appendChild(app.canvas);
         app.stage.addChild(drawTable());
         const guide = new Graphics();
+        const pocketMark = new Graphics();
+        app.stage.addChild(pocketMark);
         const ballLayer = new Container();
         const stick = new Graphics();
         app.stage.addChild(guide, ballLayer, stick);
@@ -107,6 +109,14 @@ export function TableView({ game }: { game: TableController }) {
             sprite.view.scale.set(1);
             sprite.view.visible = !b.potted || placing;
             sprite.view.alpha = placing ? (snap.placingValid ? 0.85 : 0.35) : 1;
+          }
+          // Kneipenregel: die Tasche markieren, in die der Spieler am Zug die 8 spielen muss
+          pocketMark.clear();
+          const target = snap.state.winner === null ? eightPocket(snap.state, snap.state.turn) : null;
+          if (target !== null) {
+            const v = toView(POCKETS[target]!);
+            const pulse = 0.5 + 0.5 * Math.sin(performance.now() / 350);
+            pocketMark.circle(v.x, v.y, POCKET_DRAW_RADIUS + 4 + 2 * pulse).stroke({ width: 3, color: AMBER, alpha: 0.6 + 0.4 * pulse });
           }
           drawGuide(guide, snap.phase === "aiming" ? snap : null, balls);
           drawStick(stick, snap.phase === "aiming" ? snap : null, balls);
