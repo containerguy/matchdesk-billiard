@@ -59,3 +59,26 @@ test("Der Computer stößt sichtbar in Echtzeit, freies Üben bleibt möglich", 
 function escape(text: string) {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+test("Eingebettete Partie gegen den Computer (Matchdesk „Tisch öffnen“)", async ({ browser }) => {
+  const { page, errors } = await newPlayer(browser, { fast: true });
+  await page.goto("/?embed=1&solo=easy&name=Anna");
+  await expect(page.locator(".app.embed")).toBeVisible();
+  await expect(page.locator(".topbar")).toHaveCount(0);
+  await expect(page.locator(".player .name").nth(0)).toContainText("Anna");
+  await expect(page.locator(".player .name").nth(1)).toContainText("Computer (Leicht)");
+
+  // Stoßen, bis der Computer einmal selbst gestoßen hat
+  const rnd = seeded(3);
+  let computerShot = false;
+  for (let turn = 0; turn < 40 && !computerShot; turn++) {
+    if (!(await waitForTurn(page, 60_000))) break;
+    await shoot(page, { place: { x: 400, y: 560 }, aimAt: turn === 0 ? { x: 1680, y: 560 } : { x: rnd() * 2240, y: rnd() * 1120 }, power: turn === 0 ? 0.9 : 0.4 });
+    computerShot = (await gameLog(page).allInnerTexts()).some((line) => line.startsWith("Computer"));
+  }
+  expect(computerShot).toBe(true);
+
+  await page.getByRole("button", { name: "Neue Partie" }).click();
+  await expect(hint(page)).toHaveText(/Kopflinie/);
+  expect(errors).toEqual([]);
+});
