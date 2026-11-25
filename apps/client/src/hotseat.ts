@@ -10,6 +10,8 @@ export class HotseatGame extends TableController {
   }
 
   newGame() {
+    // Ein noch rollender Stoß der alten Partie darf die neue nicht überschreiben
+    this.abortShot();
     const state = billard.createInitialState({ seed: Date.now() % 2 ** 31, startingSeat: 0 });
     this.set({ log: [`Neue Partie. ${this.snapshot.names[0]} hat den Anstoß.`] });
     this.adopt(state);
@@ -17,6 +19,7 @@ export class HotseatGame extends TableController {
 
   /** Baut am lokalen Tisch eine vorgegebene Stellung auf (Fehlersuche und End-to-End-Tests). */
   loadPosition(state: BillardState) {
+    this.abortShot();
     this.set({ log: ["Stellung aufgebaut."] });
     this.adopt(state);
   }

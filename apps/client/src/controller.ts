@@ -337,6 +337,11 @@ export abstract class TableController {
     this.set({ phase: "rolling", canAct: false, preview: null, placingPos: null, angle: move.shot.angle, power: move.shot.power });
   }
 
+  /** Bricht einen laufenden Stoß ab, ohne ihn zu werten (z. B. wenn neu aufgebaut wird). */
+  protected abortShot() {
+    this.running = null;
+  }
+
   protected isRolling() {
     return this.running !== null;
   }
