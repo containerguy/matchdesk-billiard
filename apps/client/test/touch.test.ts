@@ -10,6 +10,12 @@ class TestTable extends TableController {
     super(state, ["A", "B"], []);
     this.adopt(state);
   }
+  /** Die Uhr steht still, bis ein Test sie weiterdreht. */
+  time = 0;
+  protected override clock = () => this.time;
+  wait(ms: number) {
+    this.time += ms;
+  }
   protected mayAct(_state: BillardState) {
     return true;
   }
@@ -107,5 +113,58 @@ describe("Touchsteuerung", () => {
     table.setPower(0.8);
     table.shootNow();
     expect(table.moves).toEqual([{ shot: { angle: 0, power: 0.8, spin: { x: 0, y: 0 } }, cueBallPos: { x: 400, y: 560 } }]);
+  });
+
+  describe("Abheben des Fingers", () => {
+    /** Wischt in ruhigen Schritten um die Weiße und hält dann still. */
+    function swiped() {
+      const table = placed();
+      table.pointerDown({ x: 1400, y: 560 }, true);
+      for (const y of [660, 760, 860]) {
+        table.wait(60);
+        table.pointerMove({ x: 1400, y }, true);
+      }
+      return table;
+    }
+
+    it("verstellt das Ziel nicht, wenn der Finger beim Abheben noch etwas rollt", () => {
+      const table = swiped();
+      const aimed = table.getSnapshot().angle;
+      table.wait(400);
+      // Der Finger rollt beim Abheben ein paar Pixel weiter
+      for (const y of [868, 880, 895]) {
+        table.wait(20);
+        table.pointerMove({ x: 1404, y }, true);
+      }
+      expect(table.getSnapshot().angle).not.toBe(aimed);
+      table.wait(10);
+      table.pointerUp(true);
+      expect(table.getSnapshot().angle).toBe(aimed);
+      expect(table.getSnapshot().preview).not.toBeNull();
+    });
+
+    it("übernimmt eine zügige Bewegung bis zum Loslassen", () => {
+      const table = swiped();
+      table.wait(30);
+      table.pointerMove({ x: 1400, y: 1000 }, true);
+      const aimed = table.getSnapshot().angle;
+      table.wait(10);
+      table.pointerUp(true);
+      expect(table.getSnapshot().angle).toBe(aimed);
+    });
+
+    it("setzt die Weiße dort, wo der Finger vor dem Abheben lag", () => {
+      const table = new TestTable();
+      table.pointerDown({ x: 300, y: 300 }, true);
+      table.wait(200);
+      table.pointerMove({ x: 400, y: 560 }, true);
+      table.wait(400);
+      table.pointerMove({ x: 404, y: 572 }, true);
+      table.wait(20);
+      table.pointerMove({ x: 409, y: 590 }, true);
+      table.wait(10);
+      table.pointerUp(true);
+      expect(table.currentBalls().find((b) => b.id === 0)!.pos).toEqual({ x: 400, y: 560 });
+    });
   });
 });
