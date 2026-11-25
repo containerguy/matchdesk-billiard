@@ -99,5 +99,8 @@ test("Kneipenregel: die 8 muss in die Tasche gegenüber der letzten eigenen Kuge
   // Die Partie zu Ende spielen: die 8 entscheidet, in welcher Tasche auch immer
   for (let turn = 0; turn < 250 && (await waitForTurn(page)); turn++) await playTurn(page, (await visibleState(page)) as unknown as RuleState);
   await expect(gameLog(page).last()).toContainText(/gewinnt \(8 (regulär versenkt|in die falsche Tasche versenkt|mit Foul versenkt|zu früh versenkt)\)/);
+  // Am Übungstisch feiert der Tisch den Sieger mit Namen
+  await expect(page.locator(".celebration")).toHaveAttribute("data-result", "neutral");
+  await expect(page.locator(".celebration-banner strong")).toHaveText(/^Spieler \d gewinnt!$|^Spieler gewinnt!$/);
   expect(errors).toEqual([]);
 });

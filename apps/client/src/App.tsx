@@ -531,9 +531,53 @@ function PlayArea({ game, seats, score, mySeat }: { game: TableController; seats
         </div>
         <PlayerCard snap={snap} seat={1} info={seats[1]} me={mySeat === 1} />
       </div>
-      <TableView game={game} />
+      <div className="table-stage">
+        <TableView game={game} />
+        {snap.state.winner !== null && snap.phase === "over" && (
+          <Celebration key={snap.state.shots} winnerName={snap.names[snap.state.winner]} result={mySeat === null ? "neutral" : snap.state.winner === mySeat ? "won" : "lost"} />
+        )}
+      </div>
       <Controls game={game} snap={snap} online={mySeat !== null} />
     </>
+  );
+}
+
+const CONFETTI_COLORS = ["#F2A93B", "#3B7DD8", "#D9452B", "#2E9A5A", "#7A4BC2", "#F4F1EA"];
+
+/** Abschluss einer Partie über dem Tisch: Konfetti für den Sieger, ein ruhiger Hinweis für den Verlierer. */
+function Celebration({ result, winnerName }: { result: "won" | "lost" | "neutral"; winnerName: string }) {
+  const festive = result !== "lost";
+  // Fester Pseudozufall je Stück, damit sich das Konfetti bei jedem Neuzeichnen gleich verhält
+  const spread = (i: number, salt: number) => ((Math.sin(i * 12.9898 + salt * 78.233) * 43758.5453) % 1 + 1) % 1;
+  return (
+    <div className={`celebration ${result}`} data-result={result} role="status">
+      {festive && (
+        <div className="confetti" aria-hidden="true">
+          {Array.from({ length: 70 }, (_, i) => (
+            <i
+              key={i}
+              style={
+                {
+                  left: `${spread(i, 1) * 100}%`,
+                  background: CONFETTI_COLORS[i % CONFETTI_COLORS.length],
+                  "--drift": `${(spread(i, 2) - 0.5) * 160}px`,
+                  "--turns": `${(spread(i, 3) - 0.5) * 6}turn`,
+                  animationDelay: `${spread(i, 4) * 0.9}s`,
+                  animationDuration: `${2.2 + spread(i, 5) * 1.6}s`,
+                  width: `${6 + spread(i, 6) * 6}px`,
+                  height: `${10 + spread(i, 7) * 8}px`
+                } as React.CSSProperties
+              }
+            />
+          ))}
+        </div>
+      )}
+      <div className="celebration-banner">
+        {festive && <span className="trophy" aria-hidden="true">🏆</span>}
+        <strong>{result === "won" ? "Gewonnen!" : result === "lost" ? "Verloren" : `${winnerName} gewinnt!`}</strong>
+        {result === "lost" && <span className="muted">{winnerName} gewinnt diese Partie.</span>}
+      </div>
+    </div>
   );
 }
 

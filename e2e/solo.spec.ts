@@ -20,10 +20,16 @@ test("Solo-Partie gegen den Computer bis zum Ende", async ({ browser }) => {
   expect(computerShots).toBeGreaterThan(0);
   await expect(page.locator(".badge", { hasText: "Gewonnen" })).toHaveCount(1);
   await expect(gameLog(page).last()).toContainText("gewinnt");
+  // Abschluss über dem Tisch: Konfetti und "Gewonnen!" für den Sieger, ein ruhiger Hinweis nach einer Niederlage
+  const humanWon = (await page.locator(".player").first().locator(".badge").innerText()) === "Gewonnen";
+  await expect(page.locator(".celebration")).toHaveAttribute("data-result", humanWon ? "won" : "lost");
+  await expect(page.locator(".celebration-banner strong")).toHaveText(humanWon ? "Gewonnen!" : "Verloren");
+  await expect(page.locator(".celebration .confetti i")).toHaveCount(humanWon ? 70 : 0);
 
   // Neue Partie beginnt wieder mit dem eigenen Anstoß
   await page.getByRole("button", { name: "Neue Partie" }).click();
   await expect(hint(page)).toHaveText(/Kopflinie/);
+  await expect(page.locator(".celebration")).toHaveCount(0);
   expect(errors).toEqual([]);
 });
 
