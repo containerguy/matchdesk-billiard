@@ -65,14 +65,23 @@ test("Touchsteuerung am Smartphone: Weiße ziehen, wischend zielen, fein nachste
   await page.touchscreen.tap(target.x, target.y);
   await expect.poll(async () => degrees((await aim(page)).angle)).toBeCloseTo(0, 0);
 
-  // Fein nachstellen in kleinen Schritten, die Lupe erscheint dazu
+  // Fein nachstellen in kleinen Schritten
   const tapped = degrees((await aim(page)).angle);
-  await expect(loupe).toHaveAttribute("data-loupe", "off", { timeout: 5_000 });
+  await expect(loupe).toHaveAttribute("data-loupe", "off", { timeout: 15_000 });
   await page.getByRole("button", { name: "Fein nach rechts zielen" }).tap();
   await expect.poll(async () => degrees((await aim(page)).angle) - tapped).toBeCloseTo(0.15, 2);
-  await expect(loupe).toHaveAttribute("data-loupe", "on");
   await page.getByRole("button", { name: "Fein nach links zielen" }).tap();
   await expect.poll(async () => degrees((await aim(page)).angle) - tapped).toBeCloseTo(0, 2);
+
+  // Gehalten dreht der Knopf weiter, und die Lupe zeigt dabei den Zielpunkt
+  const hold = (await page.getByRole("button", { name: "Fein nach rechts zielen" }).boundingBox())!;
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: hold.x + hold.width / 2, y: hold.y + hold.height / 2 }] });
+  await expect.poll(async () => degrees((await aim(page)).angle) - tapped).toBeGreaterThan(1);
+  await expect(loupe).toHaveAttribute("data-loupe", "on");
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  const held = (await aim(page)).angle;
+  await page.waitForTimeout(500);
+  expect((await aim(page)).angle).toBe(held);
 
   // Die gesetzte Weiße lässt sich mit dem Finger noch einmal verschieben
   await finger("touchStart", { x: 400, y: 560 });
@@ -85,7 +94,7 @@ test("Touchsteuerung am Smartphone: Weiße ziehen, wischend zielen, fein nachste
 
   // Stärke am Regler, Stoß per Knopf
   await page.touchscreen.tap(target.x, target.y);
-  await page.locator("#power").fill("85");
+  await page.locator("#power").fill("25");
   const before = await shotCount(page);
   await page.getByRole("button", { name: "Stoß", exact: true }).tap();
   await expect.poll(() => shotCount(page), { timeout: 40_000 }).toBeGreaterThan(before);

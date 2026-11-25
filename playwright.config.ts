@@ -5,7 +5,8 @@ const PORT = 3210;
 /** End-to-End-Tests im Browser gegen den gebauten Client und den echten Spielserver. */
 export default defineConfig({
   testDir: "e2e",
-  timeout: 180_000,
+  // Die Prüfrechner auf GitHub zeichnen ohne Grafikkarte: Partien in Echtzeit dauern dort ein Mehrfaches
+  timeout: 420_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
